@@ -222,8 +222,19 @@ hour15$production_lag9 <- lag(hour15$production, 9)
 hour16$production_lag9 <- lag(hour16$production, 9)
 hour17$production_lag9 <- lag(hour17$production, 9)
 hour18$production_lag9 <- lag(hour18$production, 9)
-
-
+hoursix$production_lag9[is.na(hoursix$production_lag9)] <- hoursix$production[is.na(hoursix$production_lag9)]
+hourseven$production_lag9[is.na(hourseven$production_lag9)] <- hourseven$production[is.na(hourseven$production_lag9)]
+houreight$production_lag9[is.na(houreight$production_lag9)] <- houreight$production[is.na(houreight$production_lag9)]
+hournine$production_lag9[is.na(hournine$production_lag9)] <- hournine$production[is.na(hournine$production_lag9)]
+hourten$production_lag9[is.na(hourten$production_lag9)] <- hourten$production[is.na(hourten$production_lag9)]
+houreleven$production[is.na(houreleven$production_lag9)] <- houreleven$production[is.na(houreleven$production_lag9)]
+hourtwelve$production_lag9[is.na(hourtwelve$production_lag9)] <- hourtwelve$production[is.na(hourtwelve$production_lag9)]
+hour13$production_lag9[is.na(hour13$production_lag9)] <- hour13$production[is.na(hour13$production_lag9)]
+hour14$production_lag9[is.na(hour14$production_lag9)] <- hour14$production[is.na(hour14$production_lag9)]
+hour15$production_lag9[is.na(hour15$production_lag9)] <- hour15$production[is.na(hour15$production_lag9)]
+hour16$production_lag9[is.na(hour16$production_lag9)] <- hour16$production[is.na(hour16$production_lag9)]
+hour17$production_lag9[is.na(hour17$production_lag9)] <- hour17$production[is.na(hour17$production_lag9)]
+hour18$production_lag9[is.na(hour18$production_lag9)] <- hour18$production[is.na(hour18$production_lag9)]
 library(tseries)
 adf.test(hoursix$production)
 library(forecast)
@@ -234,15 +245,32 @@ snow_variables <- grepl("CSNOW_surface_DSWRF_", colnames(hoursix))
 predictors <- c("mean_temp","cloud_mean","tc_mean","DLWRF_mean","production_lag9",colnames(train_data)[snow_variables])
 
 specific_date_predictors <- subset(test_data, datetime == as.POSIXct("2024-04-16 06:00:00"))[, predictors]
+#####
 
 
+# Assuming your time series data is stored in 'ts_data'
+
+time_series <- train_data[, -1]  # Exclude the first column (assuming it's the time variable)
+
+# Loop through each variable and fit ARIMA model
+for (col in colnames(time_series)) {
+  ts_data <- ts(train_data[[col]], frequency = 1)  # Assuming non-seasonal data
+  
+  # Fit ARIMA model
+  arima_model <- auto.arima(ts_data, seasonal = FALSE)
+  
+  # Print model summary
+  print(summary(arima_model))
+}
+
+######
 # Train a linear regression model using your training data
 lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("production", predictors)])
-
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 
-
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+# Assuming your time series data is stored in 'ts_data'
+
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_6 <- linear_regression_prediction + arima_prediction
@@ -263,13 +291,12 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
-
-linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_7 <- linear_regression_prediction + arima_prediction
-prediction_hour_7
+
 
 
 
@@ -286,10 +313,11 @@ specific_date_predictors <- subset(test_data, datetime == as.POSIXct("2024-04-16
 lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("production", predictors)])
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_8 <- linear_regression_prediction + arima_prediction
-
+prediction_hour_8
 #### FORECASTING FOR HOUR NINE
 # Split data into training and testing sets
 train_data <- hournine[1:800, ]
@@ -320,10 +348,11 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_10 <- linear_regression_prediction + arima_prediction
-
+prediction_hour_10
 #### FORECASTING FOR HOUR ELEVEN
 # Split data into training and testing sets
 train_data <- houreleven[1:800, ]
@@ -337,6 +366,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_11 <- linear_regression_prediction + arima_prediction
@@ -354,6 +384,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_12 <- linear_regression_prediction + arima_prediction
@@ -370,6 +401,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_13 <- linear_regression_prediction + arima_prediction
@@ -386,6 +418,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_14 <- linear_regression_prediction + arima_prediction
@@ -402,6 +435,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_15 <- linear_regression_prediction + arima_prediction
@@ -418,6 +452,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_16 <- linear_regression_prediction + arima_prediction
@@ -434,6 +469,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_17 <- linear_regression_prediction + arima_prediction
@@ -450,6 +486,7 @@ lm_model <- lm(production ~ . + production_lag9, data = train_data[, c("producti
 # Make predictions using the linear regression model for the specific date and hour
 linear_regression_prediction <- predict(lm_model, newdata = specific_date_predictors)
 linear_regression_prediction <- tail(linear_regression_prediction, 1)
+arima_model <- auto.arima(train_data$production, seasonal = FALSE)
 arima_forecast <- forecast(arima_model, h = 1)
 arima_prediction <- arima_forecast$mean
 prediction_hour_18 <- linear_regression_prediction + arima_prediction
@@ -505,6 +542,7 @@ accuracy_metrics <- accu(actual_values, predictions)
 
 # Print the accuracy metrics
 print(accuracy_metrics)
+
 
 
 
