@@ -1,0 +1,1126 @@
+---
+title: "IE 360 Project Report, Linear Regression: Hourly Analysis"
+author: "Ecem Öztürk, İlayda Küçükafacan, Serra Topaloplu"
+date: "2024-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Hourly Analysis
+
+## Hour 4 Analysis
+
+The linear regression model for hour 4 includes several parameters such as `lag_1_production`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `special_period`, and `trend_hour_4`. This model aims to capture the production pattern at 4 AM, which generally has limited data due to minimal solar activity at this time.
+
+```{r}
+#Production data for hour 4
+hour_4_data <- all_data[all_data$hour == 4, ]
+
+# Plot production for hour 4
+ggplot(hour_4_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 4",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Filter data for hour 4
+hour_4_data <- all_data[all_data$hour == 4, ]
+hour_4_data$trend_hour_4 <- 1:nrow(hour_4_data)
+hour_4_data[, lag_1_production := shift(production,1)]
+hour_4_data[,lag_1_diff:=production-lag_1_production]
+hour_4_data <- hour_4_data[!is.na(lag_1_production)]
+# Fit linear regression model for hour 4
+lm_hour_4 <- lm(production ~+lag_1_production +DLWRF_surface+TMP_surface+hourly_cloud_average+special_period+trend_hour_4+month, data = hour_4_data)
+# Summarize the model
+summary(lm_hour_4)
+checkresiduals(lm_hour_4)
+```
+
+#### Model Summary
+
+**Coefficients and Significance:**
+
+-   **Lag 1 Production:** Highly significant with a positive impact, indicating that the production from the previous hour heavily influences the current hour's production.
+
+-   **DLWRF Surface, TMP Surface, Hourly Cloud Average:** These parameters show lower significance, indicating minimal impact on the prediction for this hour.
+
+-   **Special Period:** Significant and negatively impacting, indicating that during the special period, the production at hour 4 is lower.
+
+-   **Monthly Effects:** Certain months like June and July have significant coefficients, indicating seasonal variations in production.
+
+**Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.6806, suggesting that the model explains about 68.06% of the variability in production.
+
+-   **Adjusted R-squared:** 0.6742, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+he WMAPE for hour 4 was found to be 1407.11%, indicating a inaccuracy model.
+
+### Visualization and Interpretation
+
+**Hourly Production Data for Hour 4:**
+
+-   The plot shows limited production data, mostly clustered around specific periods, indicating times when solar production was active.
+
+**Residuals Analysis:**
+
+-   **Top Plot (Residuals over time):** Indicates potential periods of higher residuals, suggesting times when the model predictions were less accurate.
+
+-   **ACF Plot (Autocorrelation of Residuals):** Shows autocorrelation in the residuals, which might suggest that some patterns in the data are not fully captured by the model.
+
+-   **Histogram (Distribution of Residuals):** Indicates that residuals are centered around zero but have some deviation, highlighting the areas where predictions might be off.
+
+## Hour 5 Analysis
+
+For hour 5, a similar approach to the one used for hour 4 was applied. The linear regression model included parameters like `lag_1_production`, `dlwrf_surface`, `is.ramadan`, `special_period`, `trend_hour_5`, and interactions between `month` and `hourly_max_t`.
+
+```{r}
+#Production data for hour 5
+hour_5_data <- all_data[all_data$hour == 5, ]
+
+# Plot production for hour 4
+ggplot(hour_5_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 5",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Filter data for hour 5
+hour_5_data <- all_data[all_data$hour == 5, ]
+hour_5_data <- hour_5_data[,-c(2)]
+hour_5_data[, lag_1_production := shift(production,1)]
+hour_5_data[,lag_1_diff:=production-lag_1_production]
+hour_5_data <- hour_5_data[!is.na(lag_1_production)]
+hour_5_data$trend_hour_5 <- 1:nrow(hour_5_data)
+# Fit linear regression model for hour 5
+lm_hour_5 <- lm(production ~+lag_1_production+DLWRF_surface+is.ramadan+special_period+trend_hour_5 +month*hourly_max_t, data = hour_5_data)
+# Summarize the model
+summary(lm_hour_5)
+checkresiduals(lm_hour_5)
+plot(lm_hour_5)
+```
+
+#### Model Summary
+
+**Coefficients and Significance:**
+
+-   **Lag 1 Production:** Highly significant with a positive impact, indicating that the production from the previous hour continues to influence the current hour's production significantly.
+
+-   **DLWRF Surface:** Shows lower significance, indicating a minimal direct impact on the predictions for this hour.
+
+-   **Is Ramadan:** Significant and negatively impacting, suggesting lower production during Ramadan.
+
+-   **Special Period:** Highly significant and negatively impacting, indicating lower production during this period.
+
+-   **Trend Hour 5:** Significant and positively impacting, suggesting a gradual increase in production over time.
+
+**Monthly Effects:**
+
+-   Some months showed significant interactions with `hourly_max_t`, highlighting seasonal variations in production.
+
+**Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.6002, suggesting that the model explains about 60.02% of the variability in production.
+
+-   **Adjusted R-squared:** 0.5868, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+he WMAPE for hour 5 was found to be 154.10%, indicating a inaccuracy model.
+
+### Visualization and Interpretation
+
+**Hourly Production Data for Hour 5:**
+
+-   The data for hour 5 is more populated than hour 4, indicating a clearer pattern of production as the sun rises.
+
+**Residuals Analysis:**
+
+-   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+-   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+-   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 6 Analysis
+
+For hour 6, the linear regression model included parameters such as `lag_1_production`, `uswrf_top_of_atmosphere`, `wday`, `hourly_cloud_average`, `is.ramadan`, `special_period`, `is.religousday`, and interactions between `month` and `hourly_max_t`.
+
+```{r}
+hour_6_data <- all_data[all_data$hour == 6, ]
+
+# Plot production for hour 6
+ggplot(hour_6_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 6",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Filter data for hour 6
+hour_6_data <- all_data[all_data$hour == 6, ]
+hour_6_data <- hour_6_data[, -c(2)]
+# Convert the data frame to a data.table
+setDT(hour_6_data)
+# Create a lagged variable for production with a lag of 1 period
+hour_6_data[, lag_1_production := shift(production,1)]
+hour_6_data[,lag_1_diff:=production-lag_1_production]
+hour_6_data <- hour_6_data[!is.na(lag_1_production)]
+hour_6_data$trend_hour_6 <- 1:nrow(hour_6_data)
+# Fit linear regression model for hour 6
+lm_hour_6 <- lm(production~+lag_1_production+USWRF_top_of_atmosphere+wday+ hourly_cloud_average+is.ramadan+special_period+is.religousday+month*hourly_max_t, data = hour_6_data) 
+#lm_hour_6 <- lm(production ~ +uswrf_top_of_atmosphere + is.ramadan +is.weekend+ is.religousday +is.publicholiday + month*hourly_max_t , data = hour_6_data)
+# Summarize the model
+summary(lm_hour_6)
+checkresiduals(lm_hour_6)
+plot(lm_hour_6)
+```
+
+#### Model Summary
+
+**Coefficients and Significance:**
+
+-   **Lag 1 Production:** Highly significant with a positive impact, indicating that the production from the previous hour continues to influence the current hour's production significantly.
+
+-   **USWRF Top of Atmosphere:** Shows lower significance, indicating a minimal direct impact on the predictions for this hour.
+
+-   **Wday:** Certain days of the week show borderline significance, suggesting potential weekly patterns in production.
+
+-   **Hourly Cloud Average:** Significant and negatively impacting, indicating that higher cloud coverage reduces production.
+
+-   **Is Ramadan:** Borderline significant and negatively impacting, suggesting lower production during Ramadan.
+
+-   **Special Period:** Highly significant and negatively impacting, indicating lower production during this period.
+
+-   **Monthly Effects:** Some months showed significant interactions with `hourly_max_t`, highlighting seasonal variations in production.
+
+**Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.6422, suggesting that the model explains about 64.22% of the variability in production.
+
+-   **Adjusted R-squared:** 0.6271, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+he WMAPE for hour 6 was found to be 66.29%, indicating a reasonably accurate model.
+
+### Visualization and Interpretation
+
+**Hourly Production Data for Hour 6:**
+
+-   The data for hour 6 is more populated than earlier hours, indicating a clearer pattern of production as the sun rises and solar activity increases.
+
+**Residuals Analysis:**
+
+-   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+-   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+-   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 7 Analysis
+
+For hour 7, the linear regression model included parameters such as `lag_1_production`, `trend_hour_7`, `special_period`, `dlwrf_surface`, `hourly_cloud_average`, `month`, and `hourly_max_t`.
+
+```{r}
+# Plot production for hour 7
+ggplot(hour_7_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 7",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+library(data.table)
+
+# Filter data for hour 7 and remove the hour column
+hour_7_data <- all_data[all_data$hour == 7, ]
+hour_7_data <- hour_7_data[, -c(2)]
+
+# Create a trend variable for hour 7
+hour_7_data$trend_hour_7 <- 1:nrow(hour_7_data)
+
+# Convert the data frame to a data.table
+setDT(hour_7_data)
+
+# Create a lagged variable for production with a lag of 1 period
+hour_7_data[, lag_1_production := shift(production,1)]
+hour_7_data[,lag_1_diff:=production-lag_1_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_7_data <- hour_7_data[!is.na(lag_1_production)]
+
+# Fit linear regression model for hour 7 including the lagged variable
+lm_hour_7 <- lm(production ~+lag_1_production+trend_hour_7 + special_period + DLWRF_surface + hourly_cloud_average + month+hourly_max_t,data=hour_7_data)
+summary(lm_hour_7)
+
+# Check residuals
+library(forecast)
+checkresiduals(lm_hour_7)
+
+# Plot the model
+plot(lm_hour_7)
+```
+
+#### Model Summary
+
+**Coefficients and Significance:**
+
+-   **Lag 1 Production:** Highly significant with a positive impact, indicating that the production from the previous hour continues to influence the current hour's production significantly.
+
+-   **Trend Hour 7:** Significant and positively impacting, suggesting a gradual increase in production over time.
+
+-   **Special Period:** Highly significant and negatively impacting, indicating lower production during this period.
+
+-   **DLWRF Surface:** Significant and negatively impacting, indicating that downward longwave radiation reduces production.
+
+-   **Hourly Cloud Average:** Significant and negatively impacting, indicating that higher cloud coverage reduces production.
+
+-   **Monthly Effects:** Several months showed significant effects, highlighting seasonal variations in production.
+
+-   **Hourly Max T:** Significant and positively impacting, indicating that higher temperatures during specific months can increase production.
+
+**Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.6439, suggesting that the model explains about 64.39% of the variability in production.
+
+-   **Adjusted R-squared:** 0.6367, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+he WMAPE for hour 7 was found to be 29.76%, indicating a reasonably accurate model.
+
+### Visualization and Interpretation
+
+**Hourly Production Data for Hour 7:**
+
+-   The data for hour 7 shows significant improvement in model performance with a clearer pattern of production as the sun rises higher.
+
+**Residuals Analysis:**
+
+-   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+-   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+-   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 8 Analysis
+
+For hour 8, the linear regression model included significant predictors such as lag_1\_production, trend_hour_8, csnow_surface, dlwrf_surface, hourly_cloud_average, is.ramadan, and interactions between month and hourly_max_t.
+
+For hour 8, although there are still higher instances of lags in the residual ACF plot, no additional lag parameter was added to prevent multicollinearity.
+
+> **Similar assumption was also followed with other hours.**
+
+```{r}
+# Plot production for hour 8
+ggplot(hour_8_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 8",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Filter data for hour 8
+hour_8_data <- all_data[all_data$hour == 8, ]
+hour_8_data <- hour_8_data[,-c(2)]
+hour_8_data$trend_hour_8 <- 1:nrow(hour_8_data)
+# Create a lagged variable for production with a lag of 1 period
+hour_8_data[, lag_1_production := shift(production,1)]
+hour_8_data[,lag_1_diff:=production-lag_1_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_8_data <- hour_8_data[!is.na(lag_1_production)]
+#Fit linear regression model for hour 8
+lm_hour_8 <- lm(production ~ +lag_1_production+trend_hour_8+ CSNOW_surface+DLWRF_surface+hourly_cloud_average+is.ramadan+month*hourly_max_t, data = hour_8_data)
+# Summarize the model
+summary(lm_hour_8)
+
+checkresiduals(lm_hour_8)
+plot(lm_hour_8)
+```
+
+### **Model Summary:**
+
+-   **Lag 1 Production:** Highly significant with a positive impact, indicating the previous hour's production significantly influences the current hour's production.
+
+-   **Trend Hour 8:** Significant with a positive impact, suggesting a gradual increase in production over time.
+
+-   **Csnow Surface:** Significant with a negative impact, indicating snowfall negatively affects production.
+
+-   **DLWRF Surface:** Highly significant with a negative impact, indicating that downward longwave radiation at the surface negatively affects production.
+
+-   **Hourly Cloud Average:** Significant with a negative impact, indicating cloud cover reduces production.
+
+-   **Is Ramadan:** Significant with a negative impact, suggesting lower production during Ramadan.
+
+**Monthly Effects:**
+
+-   Some months showed significant interactions with hourly_max_t, highlighting seasonal variations in production.
+
+**Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.5892, suggesting that the model explains about 58.92% of the variability in production.
+
+-   **Adjusted R-squared:** 0.5749, slightly lower than Multiple R-squared, accounting for the number of predictors.
+
+-   **F-statistic:** Significant, indicating the model provides a better fit than a model with no predictors.
+
+The WMAPE for hour 8 was found to be 22.69%, indicating a reasonably accurate model.
+
+### **Visualization and Interpretation:**
+
+**Hourly Production Data for Hour 8:**
+
+-   The data for hour 8 shows a clear pattern of production, reflecting the increasing sunlight during this time of the morning.
+
+**Residuals Analysis:**
+
+-   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when model predictions were less accurate.
+
+-   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting not all patterns in the data are fully captured by the model.
+
+-   **Histogram (Distribution of Residuals):** Centered around zero but with deviations, indicating areas where predictions might be off.
+
+## Hour 9 Analysis
+
+For hour 9, a linear regression model was created, including variables such as lag_1\_production, special_period, dswrf_surface, csnow_surface, dlwrf_surface, is.nationalday, uswrf_surface, hourly_cloud_average, and interactions between month and hourly_max_t.
+
+```{r}
+# Plot production for hour 9
+ggplot(hour_9_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 9",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Filter data for hour 9
+hour_9_data <- all_data[all_data$hour == 9, ]
+hour_9_data <- hour_9_data[,-c(2)]
+hour_9_data$trend_hour_9 <- 1:nrow(hour_9_data)
+hour_9_data[, lag_1_production := shift(production,1)]
+hour_9_data[,lag_1_diff:=production-lag_1_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_9_data <- hour_9_data[!is.na(lag_1_production)]
+# Fit linear regression model for hour 9
+lm_hour_9 <- lm(production ~+lag_1_production+special_period+DSWRF_surface+CSNOW_surface+DLWRF_surface+is.nationalday+USWRF_surface+hourly_cloud_average+month*hourly_max_t, data = hour_9_data)
+# Summarize the model
+summary(lm_hour_9)
+checkresiduals(lm_hour_9)
+plot(lm_hour_9)
+```
+
+### Model Summary
+
+**Coefficients and Significance:**
+
+-   **Lag 1 Production**: Significant with a positive impact, indicating that the production from the previous hour significantly influences the current hour's production.
+
+-   **Special Period**: Not significant, suggesting minimal direct impact on the predictions for this hour.
+
+-   **DSWRF Surface**: Significant and negatively impacting, indicating lower production with higher downward shortwave radiation at the surface.
+
+-   **CSnow Surface**: Significant and negatively impacting, suggesting a decrease in production with increasing snow cover.
+
+-   **DLWRF Surface**: Highly significant and negatively impacting, indicating that downward longwave radiation negatively affects production.
+
+-   **Is National Day**: Marginally significant and positively impacting, suggesting slightly higher production on national days.
+
+-   **USWRF Surface**: Significant and positively impacting, indicating higher production with increasing upward shortwave radiation at the surface.
+
+-   **Hourly Cloud Average**: Significant and negatively impacting, suggesting lower production with higher cloud coverage.
+
+**Monthly Effects:**
+
+Some months showed significant interactions with hourly_max_t, highlighting seasonal variations in production. For example, December (Ara) and January (Oca) had notable interactions with temperature, impacting production levels.
+
+### Residuals and Diagnostics
+
+-   **Residual Standard Error**: Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared**: 0.5639, suggesting that the model explains about 56.39% of the variability in production.
+
+-   **Adjusted R-squared**: 0.5476, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic**: Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The WMAPE for hour 9 was found to be 19.51%, indicating a reasonably accurate model.
+
+### Visualization and Interpretation
+
+**Hourly Production Data for Hour 9**: The production data for hour 9 is well-populated, showing clearer patterns as the day progresses.
+
+**Residuals Analysis**:
+
+-   **Top Plot (Residuals over time)**: Displays the residuals over time, indicating periods of higher residuals and less accurate model predictions.
+
+-   **ACF Plot (Autocorrelation of Residuals)**: Shows some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+-   **Histogram (Distribution of Residuals)**: Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 10 Analysis
+
+For hour 10, the linear regression model included parameters such as lag_1\_production, csnow_surface, dlwrf_surface, hourly_cloud_average, is.weekend, is.religousday, is.nationalday, and interactions between month and hourly_max_t.
+
+```{r}
+# Plot production for hour 10
+ggplot(hour_10_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 10",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Create a trend variable for hour 10
+hour_10_data <- all_data[all_data$hour == 10, ]
+hour_10_data <- hour_10_data[,-c(2)]
+hour_10_data$trend_hour_10 <- 1:nrow(hour_10_data)
+hour_10_data[, lag_1_production := shift(production,1)]
+hour_10_data[,lag_1_diff:=production-lag_1_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_10_data <- hour_10_data[!is.na(lag_1_production)]
+# Fit linear regression model for hour 10
+lm_hour_10 <- lm(production ~+lag_1_production +CSNOW_surface+DLWRF_surface+hourly_cloud_average+is.weekend+is.religousday+is.nationalday+month*hourly_max_t, data = hour_10_data)
+summary(lm_hour_10)
+
+checkresiduals(lm_hour_10)
+plot(lm_hour_10)
+
+pacf(hour_10_data$production)
+```
+
+### **Model Summary:**
+
+-   **Lag 1 Production:** Significant with a positive impact, indicating that the previous hour's production continues to influence the current hour.
+
+-   **Csnow Surface:** Highly significant and negatively impacting, indicating reduced production during snowy conditions.
+
+-   **DLWRF Surface:** Highly significant and negatively impacting, indicating reduced production with higher downward longwave radiation.
+
+-   **Hourly Cloud Average:** Highly significant and negatively impacting, suggesting lower production with increased cloud cover.
+
+-   **Is Weekend:** Not highly significant, indicating minimal impact during weekends.
+
+-   **Is Religious Day:** Marginally significant with a positive impact, suggesting slightly higher production during religious holidays.
+
+-   **Is National Day:** Not highly significant, indicating minimal impact during national holidays.
+
+-   **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.5422, suggesting that the model explains about 54.22% of the variability in production.
+
+-   **Adjusted R-squared:** 0.5257, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The WMAPE for hour 10 was found to be 17.13%, indicating a reasonably accurate model.
+
+### **Visualization and Interpretation:**
+
+-   **Hourly Production Data for Hour 10:** The data shows significant fluctuations, indicating variability in production.
+
+-   **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 11 Analysis
+
+```{r}
+# Plot production for hour 11
+ggplot(hour_11_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 11",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Create a trend variable for hour 11
+hour_11_data <- all_data[all_data$hour == 11, ]
+hour_11_data <- hour_11_data[,-c(2)]
+hour_11_data$trend_hour_11 <- 1:nrow(hour_11_data)
+
+hour_11_data[, lag_19_production := shift(production,19)]
+hour_11_data[,lag_19_diff:=production-lag_19_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_11_data <- hour_11_data[!is.na(lag_19_production)]
+# Fit linear regression model for hour 11
+lm_hour_11 <- lm(production ~+lag_19_production+trend_hour_11+special_period+CSNOW_surface+DLWRF_surface+TMP_surface+hourly_cloud_average+is.weekend+is.religousday+is.nationalday+month*hourly_max_t, data = hour_11_data)
+summary(lm_hour_11)
+checkresiduals(lm_hour_11)
+plot(lm_hour_11)
+```
+
+-   **Model Summary:**
+
+    -   **Lag 19 Production:** Significant with a negative impact, indicating that the production 19 hours prior has a noticeable influence on the current hour.
+
+    -   **Trend Hour 11:** Not significant, suggesting no clear upward or downward trend in production over time for this hour.
+
+    -   **Special Period:** Not significant, indicating minimal impact of special periods on production during hour 11.
+
+    -   **Csnow Surface:** Highly significant and negatively impacting, indicating reduced production during snowy conditions.
+
+    -   **DLWRF Surface:** Highly significant and negatively impacting, indicating reduced production with higher downward longwave radiation.
+
+    -   **TMP Surface:** Significant with a positive impact, suggesting higher production with increased surface temperature.
+
+    -   **Hourly Cloud Average:** Significant and negatively impacting, indicating lower production with increased cloud cover.
+
+    -   **Is Weekend:** Not significant, indicating minimal impact during weekends.
+
+    -   **Is Religious Day:** Not significant, indicating minimal impact during religious holidays.
+
+    -   **Is National Day:** Not significant, indicating minimal impact during national holidays.
+
+    -   **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+    ### **Residuals and Diagnostics:**
+
+    -   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+    -   **Multiple R-squared:** 0.5386, suggesting that the model explains about 53.86% of the variability in production.
+
+    -   **Adjusted R-squared:** 0.5204, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+    -   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+    ### **Visualization and Interpretation:**
+
+    -   **Hourly Production Data for Hour 11:** The data shows significant fluctuations, indicating variability in production.
+
+    -   **Residuals Analysis:**
+
+        -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+        -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+        -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 12 Analysis
+
+```{r}
+ggplot(hour_12_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 12",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+\
+
+```{r}
+# Create a trend variable for hour 12
+hour_12_data <- all_data[all_data$hour == 12, ]
+hour_12_data <- hour_12_data[,-c(2)]
+hour_12_data[, lag_1_production := shift(production,1)]
+hour_12_data[,lag_1_diff:=production-lag_1_production]
+hour_12_data <- hour_12_data[!is.na(lag_1_production)]
+hour_12_data$trend_hour_12 <- 1:nrow(hour_12_data)
+lm_hour_12 <- lm(production ~ +lag_1_production+trend_hour_12+CSNOW_surface+DLWRF_surface+TMP_surface+hourly_cloud_average+is.weekend+is.religousday+is.nationalday+month*hourly_max_t , data = hour_12_data)
+summary(lm_hour_12)
+checkresiduals(lm_hour_12)
+plot(lm_hour_12)
+```
+
+### **Model Summary:**
+
+-   **Lag 1 Production:** Significant with a positive impact, indicating that the production 1 hour prior has a noticeable influence on the current hour.
+
+-   **Trend Hour 12:** Significant with a negative impact, suggesting a slight downward trend in production over time for this hour.
+
+-   **Csnow Surface:** Significant with a negative impact, indicating reduced production during snowy conditions.
+
+-   **DLWRF Surface:** Highly significant and negatively impacting, indicating reduced production with higher downward longwave radiation.
+
+-   **TMP Surface:** Not significant, suggesting minimal impact of surface temperature on production during hour 12.
+
+-   **Hourly Cloud Average:** Significant and negatively impacting, indicating lower production with increased cloud cover.
+
+-   **Is Weekend:** Significant with a negative impact, indicating reduced production during weekends.
+
+-   **Is Religious Day:** Not significant, indicating minimal impact during religious holidays.
+
+-   **Is National Day:** Not significant, indicating minimal impact during national holidays.
+
+-   **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.5443, suggesting that the model explains about 54.43% of the variability in production.
+
+-   **Adjusted R-squared:** 0.5258, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+**Visualization and Interpretation:**
+
+-   **Hourly Production Data for Hour 12:** The data shows significant fluctuations, indicating variability in production.
+
+-   **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 13 Analysis
+
+```{r}
+ggplot(hour_13_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 13",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+# Create a trend variable for hour 13
+hour_13_data <- all_data[all_data$hour == 13, ]
+hour_13_data <- hour_13_data[,-c(2)]
+
+hour_13_data[, lag_1_production := shift(production,1)]
+hour_13_data[,lag_1_diff:=production-lag_1_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_13_data <- hour_13_data[!is.na(lag_1_production)]
+# Remove rows with missing values in the hourly_max_t column
+hour_13_data$trend_hour_13 <- 1:nrow(hour_13_data)
+lm_hour_13 <- lm(production ~+lag_1_production +trend_hour_13+DLWRF_surface+TMP_surface+hourly_cloud_average+is.weekend+is.nationalday+is.publicholiday+month * hourly_max_t , data = hour_13_data)
+summary(lm_hour_13)
+checkresiduals(lm_hour_13)
+plot(lm_hour_13)
+```
+
+### **Model Summary:**
+
+-   **Lag 1 Production:** Significant with a positive impact, indicating that the production 1 hour prior has a noticeable influence on the current hour.
+
+-   **Trend Hour 13:** Marginally significant with a negative impact, suggesting a slight downward trend in production over time for this hour.
+
+-   **DLWRF Surface:** Highly significant and negatively impacting, indicating reduced production with higher downward longwave radiation.
+
+-   **TMP Surface:** Significant with a positive impact, suggesting higher production with increased surface temperature.
+
+-   **Hourly Cloud Average:** Significant and negatively impacting, indicating lower production with increased cloud cover.
+
+-   **Is Weekend:** Significant with a positive impact, indicating increased production during weekends.
+
+-   **Is National Day:** Significant with a positive impact, indicating higher production during national holidays.
+
+-   **Is Public Holiday:** Significant with a negative impact, indicating reduced production during public holidays.
+
+-   **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+-   **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+-   **Multiple R-squared:** 0.5576, suggesting that the model explains about 55.76% of the variability in production.
+
+-   **Adjusted R-squared:** 0.5417, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+-   **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 13 is calculated as 23.93%, performance is considerably accurate.
+
+### **Visualization and Interpretation:**
+
+-   **Hourly Production Data for Hour 13:** The data shows significant fluctuations, indicating variability in production.
+
+-   **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 14 Analysis
+
+```{r}
+ggplot(hour_14_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 14",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+hour_14_data <- all_data[all_data$hour == 14, ]
+hour_14_data <- hour_14_data[,-c(2)]
+hour_14_data$trend_hour_14 <- 1:nrow(hour_14_data)
+hour_14_data[, lag_14_production := shift(production,1)]
+hour_14_data[,lag_14_diff:=production-lag_14_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_14_data <- hour_14_data[!is.na(lag_14_production)]
+lm_hour_14 <- lm(production ~ +lag_14_production+ special_period+DLWRF_surface+TMP_surface+is.weekend+is.ramadan+is.religousday+is.nationalday+is.publicholiday+hourly_cloud_average+month*hourly_max_t , data = hour_14_data)
+summary(lm_hour_14)
+checkresiduals(lm_hour_14)
+plot(lm_hour_14)
+```
+
+### **Model Summary:**
+
+1.  **Lag 14 Production:** Significant with a positive impact, indicating that the production 1 hour prior has a noticeable influence on the current hour.
+
+2.  **Special Period:** Marginally significant with a positive impact, suggesting that special periods might slightly increase production.
+
+3.  **DLWRF Surface:** Highly significant and negatively impacting, indicating reduced production with higher downward longwave radiation.
+
+4.  **TMP Surface:** Significant with a positive impact, suggesting higher production with increased surface temperature.
+
+5.  **Is Weekend:** Significant with a positive impact, indicating increased production during weekends.
+
+6.  **Is National Day:** Significant with a positive impact, indicating higher production during national holidays.
+
+7.  **Is Public Holiday:** Significant with a negative impact, indicating reduced production during public holidays.
+
+8.  **Hourly Cloud Average:** Significant and negatively impacting, indicating lower production with increased cloud cover.
+
+9.  **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+1.  **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+2.  **Multiple R-squared:** 0.5738, suggesting that the model explains about 57.38% of the variability in production.
+
+3.  **Adjusted R-squared:** 0.5574, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+4.  **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 14 is calculated as 25.24%, considerably well.
+
+### **Visualization and Interpretation:**
+
+1.  **Hourly Production Data for Hour 14:** The data shows significant fluctuations, indicating variability in production.
+
+2.  **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 15 Analysis
+
+```{r}
+ggplot(hour_15_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 15",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+hour_15_data <- all_data[all_data$hour == 15, ]
+hour_15_data <- hour_15_data[,-c(2)]
+hour_15_data$trend_hour_15 <- 1:nrow(hour_15_data)
+hour_15_data[, lag_15_production := shift(production,1)]
+hour_15_data[,lag_15_diff:=production-lag_15_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_15_data <- hour_15_data[!is.na(lag_15_production)]
+lm_hour_15 <- lm(production ~+lag_15_production+trend_hour_15+special_period+DSWRF_surface+USWRF_top_of_atmosphere+DLWRF_surface+hourly_cloud_average+TMP_surface+is.weekend+is.ramadan+is.publicholiday +month*hourly_max_t , data = hour_15_data)
+summary(lm_hour_15)
+checkresiduals(lm_hour_15)
+plot(lm_hour_15)
+```
+
+### **Model Summary:**
+
+1.  **Lag 15 Production:** Significant with a positive impact, indicating that the production 15 hours prior has a noticeable influence on the current hour.
+
+2.  **Trend Hour 15:** Significant with a negative impact, suggesting a slight downward trend over time.
+
+3.  **Special Period:** Significant with a positive impact, indicating that special periods might slightly increase production.
+
+4.  **DSWRF Surface:** Significant with a positive impact, suggesting increased production with higher downward shortwave radiation.
+
+5.  **USWRF Top of Atmosphere:** Highly significant with a positive impact, indicating higher production with increased upward shortwave radiation.
+
+6.  **DLWRF Surface:** Highly significant with a negative impact, indicating reduced production with higher downward longwave radiation.
+
+7.  **Hourly Cloud Average:** Highly significant with a negative impact, indicating lower production with increased cloud cover.
+
+8.  **TMP Surface:** Marginally significant with a positive impact, suggesting higher production with increased surface temperature.
+
+9.  **Is Weekend:** Marginally significant with a positive impact, indicating increased production during weekends.
+
+10. **Is Ramadan:** Marginally significant with a positive impact, suggesting slightly higher production during Ramadan.
+
+11. **Is Public Holiday:** Significant with a negative impact, indicating reduced production during public holidays.
+
+12. **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+1.  **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+2.  **Multiple R-squared:** 0.6737, suggesting that the model explains about 67.37% of the variability in production.
+
+3.  **Adjusted R-squared:** 0.6608, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+4.  **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 15 is calculated as 31.63%, considerably well.
+
+### **Visualization and Interpretation:**
+
+1.  **Hourly Production Data for Hour 15:** The data shows significant fluctuations, indicating variability in production.
+
+2.  **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 16 Analysis
+
+```{r}
+ggplot(hour_16_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 16",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+hour_16_data <- all_data[all_data$hour == 16, ]
+hour_16_data <- hour_16_data[,-c(2)]
+hour_16_data$trend_hour_16 <- 1:nrow(hour_16_data)
+hour_16_data[, lag_16_production := shift(production,1)]
+hour_16_data[,lag_16_diff:=production-lag_16_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_16_data <- hour_16_data[!is.na(lag_16_production)]
+lm_hour_16 <- lm(production ~+lag_16_production+trend_hour_16+ special_period+DSWRF_surface+USWRF_top_of_atmosphere+hourly_cloud_average+is.ramadan+month*hourly_max_t, data = hour_16_data)
+summary(lm_hour_16)
+checkresiduals(lm_hour_16)
+plot(lm_hour_16)
+```
+
+### **Model Summary:**
+
+1.  **Lag 16 Production:** Highly significant with a positive impact, indicating that the production 16 hours prior strongly influences the current hour.
+
+2.  **Trend Hour 16:** Significant with a negative impact, suggesting a slight downward trend over time.
+
+3.  **Special Period:** Significant with a positive impact, indicating that special periods might slightly increase production.
+
+4.  **DSWRF Surface:** Highly significant with a positive impact, suggesting increased production with higher downward shortwave radiation.
+
+5.  **USWRF Top of Atmosphere:** Significant with a positive impact, indicating higher production with increased upward shortwave radiation.
+
+6.  **Hourly Cloud Average:** Significant with a negative impact, indicating lower production with increased cloud cover.
+
+7.  **Is Ramadan:** Significant with a positive impact, suggesting slightly higher production during Ramadan.
+
+8.  **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+1.  **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+2.  **Multiple R-squared:** 0.6828, suggesting that the model explains about 68.28% of the variability in production.
+
+3.  **Adjusted R-squared:** 0.6714, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+4.  **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 16 is calculated as 39.61%, considerably well.
+
+### **Visualization xand Interpretation:**
+
+1.  **Hourly Production Data for Hour 16:** The data shows significant fluctuations, indicating variability in production.
+
+2.  **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 17 Analysis
+
+Log transformation for hour 17 was considered. However, we have decided not to use it since it requires elimination of zero values and disrupts continuity of our data.
+
+```{r}
+ggplot(hour_17_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 17",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+hour_17_data <- all_data[all_data$hour == 17, ]
+hour_17_data <- hour_17_data[,-c(2)]
+hour_17_data$trend_hour_17 <- 1:nrow(hour_17_data)
+hour_17_data$nm <- as.numeric(format(hour_17_data$date, "%m"))
+# Assuming your date column is named 'date_column'
+hour_17_data$is_not_winter <- as.numeric(!hour_17_data$nm %in% c(12, 1, 2))
+hour_17_data <- as.data.table(hour_17_data)
+#hour_17_data <- hour_17_data[production > 0]
+#hour_17_data[, log_production := log(production)]
+hour_17_data[, lag_17_production := shift(production,1)]
+hour_17_data[,lag_17_diff:=production-lag_17_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_17_data <- hour_17_data[!is.na(lag_17_production)]
+hour_17_data <- hour_17_data[!is.na(lag_17_diff)]
+lm_hour_17 <- lm(production ~+lag_17_production+trend_hour_17+special_period+is.ramadan+is.religousday+USWRF_surface+USWRF_top_of_atmosphere+DSWRF_surface+month*hourly_max_t, data = hour_17_data)
+summary(lm_hour_17)
+checkresiduals(lm_hour_17)
+plot(lm_hour_17)
+```
+
+### **Model Summary:**
+
+1.  **Lag 17 Production:** Highly significant with a positive impact, indicating that the production 17 hours prior strongly influences the current hour.
+
+2.  **Trend Hour 17:** Significant with a negative impact, suggesting a slight downward trend over time.
+
+3.  **Special Period:** Significant with a positive impact, indicating that special periods might slightly increase production.
+
+4.  **Is Ramadan:** Significant with a positive impact, suggesting slightly higher production during Ramadan.
+
+5.  **USWRF Surface:** Marginally significant with a negative impact, indicating a slight decrease in production with increased upward shortwave radiation at the surface.
+
+6.  **DSWRF Surface:** Significant with a positive impact, suggesting increased production with higher downward shortwave radiation.
+
+7.  **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+1.  **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+2.  **Multiple R-squared:** 0.6759, suggesting that the model explains about 67.59% of the variability in production.
+
+3.  **Adjusted R-squared:** 0.6638, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+4.  **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 17 is calculated as 61.69%, considerably high error.
+
+### **Visualization and Interpretation:**
+
+1.  **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.
+
+## Hour 18 Analysis
+
+```{r}
+ggplot(hour_18_data, aes(x = date, y = production)) +
+  geom_line() +
+  labs(title = "Hourly Production Data for Hour 18",
+       x = "Date",
+       y = "Production") +
+  theme_minimal()
+```
+
+```{r}
+hour_18_data <- all_data[all_data$hour == 18, ]
+hour_18_data <- hour_18_data[,-c(2)]
+# Assuming your dataframe is named 'data' and the production column is named 'production'
+#data_18_filtered <- hour_18_data[hour_18_data$production != 0, ]
+hour_18_data$trend_hour_18 <- 1:nrow(hour_18_data)
+hour_18_data[, lag_18_production := shift(production,1)]
+hour_18_data[,lag_18_diff:=production-lag_18_production]
+# Remove rows with NA in lagged production to ensure the model can run
+hour_18_data <- hour_18_data[!is.na(lag_18_production)]
+lm_hour_18 <- lm(production ~+lag_18_production +trend_hour_18+special_period+TMP_surface+DSWRF_surface+month*hourly_max_t  , data = hour_18_data)
+summary(lm_hour_18)
+checkresiduals(lm_hour_18)
+plot(lm_hour_18)
+```
+
+### **Model Summary:**
+
+1.  **Lag 18 Production:** Significant with a positive impact, indicating that the production 18 hours prior influences the current hour.
+
+2.  **Trend Hour 18:** Not significant, suggesting the trend does not have a noticeable effect.
+
+3.  **Special Period:** Significant with a positive impact, indicating that special periods might slightly increase production.
+
+4.  **Tmp Surface:** Significant with a positive impact, suggesting that higher temperatures increase production.
+
+5.  **DSWRF Surface:** Not significant, indicating it does not significantly affect production.
+
+6.  **Monthly Effects:** Some months showed significant interactions with hourly_max_t, indicating seasonal variations in production.
+
+### **Residuals and Diagnostics:**
+
+1.  **Residual Standard Error:** Indicates the variability in the residuals or prediction errors.
+
+2.  **Multiple R-squared:** 0.1977, suggesting that the model explains about 19.77% of the variability in production.
+
+3.  **Adjusted R-squared:** 0.1719, slightly lower than Multiple R-squared, accounting for the number of predictors in the model.
+
+4.  **F-statistic:** Significant, indicating that the model provides a better fit than a model with no predictors.
+
+The Weighted Mean Absolute Percentage Error (WMAPE) for hour 18 is calculated as 87.70%, very high error.
+
+### **Visualization and Interpretation:**
+
+1.  **Residuals Analysis:**
+
+    -   **Top Plot (Residuals over time):** Shows periods of higher residuals, indicating times when the model predictions were less accurate.
+
+    -   **ACF Plot (Autocorrelation of Residuals):** Indicates some autocorrelation, suggesting that not all patterns in the data are fully captured by the model.
+
+    -   **Histogram (Distribution of Residuals):** Centered around zero but with some deviations, indicating areas where predictions might be off.

@@ -1,0 +1,543 @@
+---
+title: "IE 360 Project Report"
+author: "Ecem Öztürk, İlayda Küçükafacan, Serra Topaloplu"
+date: "2024-06-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+With the aim to address the increasing concerns about climate change and the depletion of non-renewable resources, the emergence of renewable energy sources has become essential. Due to its widespread availability and falling costs, solar power has become one of the most important renewable energy sources. Reliability, efficiency in energy grid operations, and ease of energy trading all depend on accurate solar power production predictions.
+
+The solar power forecasting of Edikli Güneş Enerjisi Santrali (GES), a solar power plant in Niğde, Turkey, is the main emphasis of this project. The goal is to use weather data from 25 grid points close to the power plant to anticipate the hourly solar power generation for the following day. Various measurements of solar radiation, cloud cover, temperature, and snow presence are among the weather variables that are offered. These factors are known to affect the production of solar electricity.
+
+The project is set up as a competition, mimicking the actual circumstances faced by market dealers of energy. Daily forecasts from participants are expected, and their accuracy is measured using the weighted mean absolute percentage error (WMAPE). The methods used to create an accurate forecasting model, including data preparation, model selection, and performance assessment, are described in this study. Future work should include these possible enhancements, and the outcomes are presented.\
+\
+With this project, we hope to add to the expanding body of knowledge on solar power forecasting and show how statistical and machine learning methods can be used to improve the precision of forecasts made using renewable energy sources.
+
+# Data Preparation
+
+In order to build an accurate forecasting model, data processing is an essential step that involves transforming raw data into a format that can be analyzed. We begin this project by reading the supplied production and weather datasets and loading the required libraries. Ensuring that the model can reliably learn from the data and produce predictions is dependent on proper data preprocessing.
+
+```{r error=FALSE, warning=FALSE}
+#Import required libraries
+install.packages("GGally")
+install.packages("matrixStats")
+
+library(forecast)
+library(data.table)
+library(lubridate)
+library(dplyr)
+library(tidyr)
+library(GGally)
+library(matrixStats)
+library(zoo)
+
+# Define today's date
+tday <- as.Date("2024-05-26")  # replace with the appropriate date
+
+# Read the data 
+file_weather <- "/Users/ilyada/Desktop/weather_info.csv"
+file_production <- "/Users/ilyada/Desktop/production.csv"
+
+weather_data <- fread(file_weather)
+production_data <- fread(file_production)
+
+weather_data <- weather_data %>%
+  arrange(date, hour)
+production_data <- production_data %>%
+  arrange(date, hour)
+
+# Convert date column to the proper Date format using as.Date
+weather_data$date <- as.Date(weather_data$date, format = "%d.%m.%Y")
+production_data$date <- as.Date(production_data$date, format = "%d.%m.%Y")
+
+# getting full weather date and hours as a template
+template_dt = unique(weather_data[,list(date,hour)])
+template_dt = merge(template_dt,production_data,by=c('date','hour'),all.x=T)
+View(template_dt)
+```
+
+First, we load and install the required libraries. Fread is used to read the production and weather data from their respective CSV files; this method works well for huge datasets. To guarantee correct alignment, the data is then sorted by hour and date. For uniformity, the date columns are changed to the Date format. The date and hour columns are then combined to generate a datetime column, which is subsequently formatted in POSIXct for precise time-series analysis. Using the meteorological data, we generate a template with distinct date and hour combinations.
+
+### Handling Missing Values
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+any_na <- anyNA(weather_data)
+if (any_na) {
+  cat("The dataset contains NA values.\n")
+  # Display the count of NAs per column
+  print(colSums(is.na(weather_data)))
+} else {
+  cat("The dataset does not contain any NA values.\n")
+}
+# Display all rows that have NA values
+na_rows <- weather_data[!complete.cases(weather_data), ]
+View(na_rows)
+
+# Fill NA values with the average of the surrounding values (linear interpolation)
+merged_data_filled <- weather_data %>%
+  mutate(across(where(is.numeric), ~ na.approx(.x, na.rm = FALSE)))
+
+# Fill leading NAs with the next available value, upward
+merged_data_filled <- merged_data_filled %>%
+  mutate(across(where(is.numeric), ~ na.locf(.x, fromLast = TRUE, na.rm = FALSE)))
+
+
+any_na <- anyNA(merged_data_filled)
+if (any_na) {
+  cat("The dataset contains NA values.\n")
+  # Display the count of NAs per column
+  print(colSums(is.na(weather_data)))
+} else {
+  cat("The dataset does not contain any NA values.\n")
+}
+
+weather_data<- merged_data_filled
+```
+
+In data analysis, handling missing values is essential to ensure the integrity and reliability of the dataset. In this project, we address the issue of missing values in the weather data as follows:
+
+1.  **Check for Missing Values**: We first check if there are any missing values (NA) in the dataset. If NA values are present, we display the count of NAs per column and identify the rows containing these missing values.
+
+2.  **Impute Missing Values**:
+
+    -   **Linear Interpolation**: Missing values are filled using linear interpolation (`na.approx`), which estimates the missing values based on the average of surrounding values.
+
+    -   **Forward Fill**: For any leading NAs (values at the beginning of the series), we use forward fill (`na.locf` with `fromLast = TRUE`), which fills these NAs with the next available value.
+
+3.  **Re-check for Missing Values**: After the imputation, we recheck for any remaining missing values to ensure the dataset is complete.
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+#Coordinate aggregation by long to wide format
+long_weather <- weather_data
+long_weather <- melt(weather_data,id.vars=c(1:4))
+hourly_region_averages = dcast(long_weather, date+hour~variable,fun.aggregate=mean)
+View(hourly_region_averages)
+
+# Merge with hourly_region_averages
+template_dt_with_weather <- merge(template_dt, hourly_region_averages, by = c('date', 'hour'), all.x = TRUE)
+View(template_dt_with_weather)
+
+# Transforming date-hour columns into datetime format
+template_dt_with_weather[, datetime := as.POSIXct(paste(date, hour), format="%Y-%m-%d %H")]
+# Reorder columns to make 'datetime' the 1st column
+setcolorder(template_dt_with_weather, c("datetime", setdiff(names(template_dt_with_weather), "datetime")))
+
+#Order it by date and hour
+template_dt_with_weather = template_dt_with_weather[order(date,hour)]
+template_dt_with_aggregate <- template_dt_with_weather
+
+template_dt_with_aggregate$hourly_cloud_average <- rowMeans(dplyr::select(template_dt_with_aggregate, starts_with("TCDC_")), na.rm = TRUE)
+template_dt_with_aggregate$hourly_max_t <- rowMaxs(as.matrix(dplyr::select(template_dt_with_aggregate, starts_with("TMP_"))), na.rm = TRUE)
+
+# Identify columns with 'tmp_' prefix
+tmp_columns <- grep("^TMP_", names(template_dt_with_aggregate))
+
+# Extract the subset of columns
+tmp_data <- template_dt_with_aggregate[, ..tmp_columns]
+View(tmp_data)
+# Convert data frame to matrix
+tmp_matrix <- as.matrix(tmp_data)
+
+# Calculate row maximums
+template_dt_with_aggregate$hourly_max_t <- rowMaxs(tmp_matrix, na.rm = TRUE)
+
+View(template_dt_with_aggregate)
+```
+
+To enhance the predictive power of our model, we perform several feature engineering steps:
+
+1.  **Long to Wide Format Transformation**: We convert the weather data from long format to wide format using the `melt` and `dcast` functions. This involves aggregating the weather variables by calculating their average values for each hour across the different coordinates. This step reduces the dimensionality of the data while retaining essential information.
+
+2.  **Merging Weather and Template Data**: The aggregated weather data is merged with our template dataset, which contains unique date and hour combinations. This ensures that we have a complete dataset for each hour, incorporating the relevant weather variables.
+
+3.  **Ordering and Aggregating Data**: The merged data is ordered by date and hour for consistency. Additional aggregate features are created:
+
+    -   `hourly_cloud_average`: The average cloud cover across all cloud-related variables (`tcdc_`).
+
+    -   `hourly_max_t`: The maximum temperature recorded across all temperature-related variables (`tmp_`).
+
+These steps help us create a more robust dataset, incorporating aggregated weather information and engineered features that are likely to improve the accuracy of our solar power production forecasts.
+
+### Final Data Preparation and Holiday Feature Integration
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+# Exclude columns starting with "TCDC_"
+template_dt_with_aggregate <- template_dt_with_aggregate %>%
+  dplyr::select(-starts_with("TCDC_"))
+
+# Read your holiday dataset
+holiday_data <- read.csv("/Users/ilyada/Desktop/IE 360 Project'24/Short Holiday.csv")
+
+# Convert date column to Date format
+holiday_data$date <- as.Date(holiday_data$date, format = "%d.%m.%Y", na.rm = TRUE)
+
+# Merge holiday data with production dataset based on the date column
+all_data <- merge(template_dt_with_aggregate, holiday_data, by = "date", all.x = TRUE)
+
+#We remove dates that is not yet been forecasted
+all_data = all_data[!is.na(production)]
+all_data_daily <- all_data[all_data$date == day_before_tday, ]
+
+available_data = all_data[!is.na(production) & hour >= 4 & hour <= 19,]
+#to_be_forecasted = template_dt_with_weather[is.na(production)]
+to_be_forecasted <- all_data[is.na(production) & hour >= 4 & hour <= 19, ]
+View(available_data)
+```
+
+In this stage, we combine more characteristics and remove superfluous columns from our dataset to further enhance it. Initially, we eliminate columns that begin with TCDC\_ in order to concentrate on the combined cloud cover attributes. The holiday data is then read, formatted, and combined with the main dataset to add holiday information that may affect the output of solar power. To make sure we only work with relevant data, we then filter out rows containing dates that have not yet been anticipated. Additionally, as solar power production is only non-zero during these hours, we filter the data to only include the hours between 4 AM and 7 PM. Lastly, we divide the dataset into two categories: to_be_forecasted (data that needs predictions) and available_data (data with known production values). These procedures guarantee that our dataset, which includes pertinent properties like holidays and aggregated weather data, is clear, complete, and prepared for model development.
+
+### Last but Not Least
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+df <- available_data
+View(df)
+# Create a new variable, moving average smoothed production.
+df$capacity = 0
+
+start = as.Date('2022-01-01')
+end = as.Date("2024-04-16")
+
+rolling_mean_days = as.list(seq(start, end, by='1 day'))
+l <- length(rolling_mean_days)
+rolling_mean_no <- 21
+m <- (rolling_mean_no-1)/2
+for(i in m:(l)){
+  for(j in 0:23){
+    poi = mean(df[(i-m)*24+(0:(rolling_mean_no-1))*24+1+j]$production)
+    df[(i)*24+j+1]$capacity <- poi
+  }
+}
+
+# Fill the last days for new variable, with the latest available value.
+fill_start = as.Date('2024-04-01')
+fill_end = as.Date('2024-04-16')
+autofill_mean_days = as.list(seq(fill_start, fill_end, by='1 day'))
+last_means = df[df$date == fill_start, "capacity"]
+for (day in autofill_mean_days){
+  df[(date==day),]$capacity = last_means
+}
+
+# Create normalized production variable.
+df[,normalized_production:=production/capacity]
+df[(capacity==0)]$normalized_production = 0
+
+# Set normalize production values bigger than 3 to 0, because they are outliers.
+df[normalized_production>3,]$normalized_production <- 0
+
+# Set outliers to 0.
+#df[normalized_production>2 & hour==5 , ]$normalized_production <- 0
+
+# Create a month variable
+df[,month:=month(as.POSIXlt(df$date, format="%YYYY-%mm-%dd"))]
+
+# Convert type of month variable to factor.
+df$month <- as.factor(df$month)
+
+hour4 <- df[df$hour == 4, ]
+hour5 <- df[df$hour == 5, ]
+hour6 <- df[df$hour == 6, ]
+hour7 <- df[df$hour == 7, ]
+hour8 <- df[df$hour == 8, ]
+hour9 <- df[df$hour == 9, ]
+hour10 <- df[df$hour == 10, ]
+hour11 <- df[df$hour == 11, ]
+hour12 <- df[df$hour == 12, ]
+hour13 <- df[df$hour == 13, ]
+hour14 <- df[df$hour == 14, ]
+hour15 <- df[df$hour == 15, ]
+hour16 <- df[df$hour == 16, ]
+hour17 <- df[df$hour == 17, ]
+hour18 <- df[df$hour == 18, ]
+hour19 <- df[df$hour == 19, ]
+```
+
+In order to boost the performance of our model, we add new features to our dataset and smooth the data in this step. We incorporate a capacity variable that symbolizes a production moving average of 21 days, mitigating short-term oscillations and emphasizing extended-term patterns. Initially, we calculate the moving average from 2022-01-01 to 2024-04-16 for each day and hour. We use the most recent value to fill the capacity on days when there is not enough data to compute the moving average. Then, we divide the actual production by the capacity to normalize production values and create a normalized_production variable. To deal with outliers, we set to 0 any normalized production values larger than 3. In order to account for seasonal variations, we also develop a month variable that is then transformed into a factor for categorical analysis. In order to prepare the dataset for hour-specific modeling, we finally divided it into hours (hour4, hour5, etc.). By doing these actions, we can make sure that our dataset is ready for reliable and accurate solar power predictions.
+
+## **Visualization of Production and Correlations**
+
+```{r}
+colnames
+# Plot the production variable
+ggplot(df, aes(x = datetime, y = normalized_production)) +
+  geom_line(color = "blue") +
+  labs(title = "Solar Power Production Over Time",
+       x = "Date and Time",
+       y = "Production (kW)") +
+  theme_minimal()
+```
+
+**Trends and Patterns**:
+
+-   **Consistency**: There is generally a consistent production pattern with fluctuations throughout the observed period.
+
+-   **Seasonal Variations**: There appear to be seasonal variations where production levels rise and fall, which could be due to changes in weather conditions, solar intensity, or other environmental factors.
+
+-   **Gaps and Drops**: Occasional drops to zero or lower production levels are noticeable, which might indicate periods of low solar irradiance, maintenance, or issues with the solar power plant.
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(lubridate)
+
+st <- df
+# Aggregate the data by month
+st_monthly <- st %>%
+  mutate(year = year(datetime), month = month(datetime, label = TRUE)) %>%
+  group_by(year, month) %>%
+  summarize(monthly_production = mean(production, na.rm = TRUE))
+
+# Create a new datetime column for plotting
+st_monthly <- st_monthly %>%
+  mutate(datetime = as.Date(paste(year, month, "01", sep = "-"), format = "%Y-%b-%d"))
+
+# Plot the aggregated data
+ggplot(st_monthly, aes(x = datetime, y = monthly_production)) +
+  geom_line(color = "blue") +
+  labs(title = "Average Monthly Solar Power Production Over Time",
+       x = "Date",
+       y = "Average Monthly Production (kW)") +
+  theme_minimal()
+```
+
+1.  **Seasonal Variations**: There is a clear seasonal pattern in solar power production. Peaks in production are observed during the summer months, particularly around mid-2022 and mid-2023, while dips are noticeable in the winter months, especially at the start of 2023 and 2024. This trend aligns with the expected increase in solar radiation during the longer days of summer and the decrease during the shorter days of winter.
+
+2.  **Production Peaks**: The highest average monthly production was observed in mid-2022 and again in mid-2023, with values reaching up to around 5 kW. This suggests that during these periods, conditions were most favorable for solar power generation.
+
+3.  **Production Dips**: The lowest production levels were seen in early 2023 and early 2024, dropping to around 2 kW. These dips coincide with the winter months when solar radiation is typically at its lowest due to shorter daylight hours and potentially more cloudy days.
+
+4.  **Yearly Cycles**: The pattern shows a roughly annual cycle, with production rising and falling in a regular pattern. This cyclical nature highlights the impact of seasonal changes on solar power production.
+
+5.  **Trends**: Over the observed period, there is no significant upward or downward trend in average monthly production, indicating that the solar power system's performance is relatively stable year-over-year.
+
+```{r, message=FALSE, error=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# Load the necessary library
+library(GGally)
+
+# Create a subset of the data including relevant variables
+df_subset <- df %>% select(production, hourly_max_t,hourly_cloud_average, normalized_production, hour,DSWRF_surface, 
+                           USWRF_top_of_atmosphere,CSNOW_surface,DLWRF_surface,USWRF_surface,TMP_surface)
+
+# Plot the ggpairs correlation matrix
+ggpairs(df_subset)
+```
+
+**Key Influencers:** Hourly maximum temperature, downward shortwave radiation flux at the surface, and surface temperature show moderate positive correlations with solar power production, indicating they are significant predictors.
+
+**Negative Influencers:** Cloud cover and snow presence negatively correlate with production, as expected.
+
+**Weak Correlations:** Variables like hour, downward longwave radiation flux, and upward shortwave radiation flux at the top of the atmosphere show weak correlations, suggesting they have limited direct impact on production.
+
+```{r, message=FALSE, error=FALSE, warning=FALSE, fig.width=12, fig.height=12}
+# Load necessary libraries
+library(ggcorrplot)
+library(dplyr)
+
+# Convert month to numeric
+df$month <- as.numeric(df$month)
+
+# Create a correlation matrix for the numeric variables in the dataframe
+df_numeric <- df %>% select_if(is.numeric)  # Select only numeric columns
+correl_info <- cor(df_numeric, use = "complete.obs")  # Calculate correlation matrix
+
+# Plot the correlation matrix using ggcorrplot
+ggcorrplot(correl_info, 
+           hc.order = TRUE, 
+           type = "lower",
+           lab = TRUE)
+
+```
+
+-   **Key Influencers**: Downward shortwave radiation flux at the surface, upward shortwave radiation flux at the surface, hourly maximum temperature, surface temperature, and capacity show moderate to strong positive correlations with solar power production, indicating they are significant predictors.
+
+-   **Negative Influencers**: Cloud cover and the presence of snow negatively correlate with production, as expected.
+
+-   **Weak Correlations**: Variables like hour, holidays, and weekends show weak or no significant correlations, suggesting they have limited direct impact on production.
+
+To avoid multicollinearity in your linear regression model, you should exclude variables that are highly correlated with each other. Multicollinearity can cause issues in the estimation of regression coefficients and reduce the model's interpretability. Based on the correlation matrix, here are some key observations and suggestions for variable selection:
+
+**Highly Correlated Pairs**:
+
+-   TMP_surface and hourly_max_t: Correlation of 0.74
+
+-   DSWRF_surface and USWRF_surface: Correlation of 0.70
+
+-   DLWRF_surface and TMP_surface: Correlation of 0.70
+
+-   capacity and DSWRF_surface: Correlation of 0.66
+
+-   capacity and hourly_max_t: Correlation of 0.66
+
+-   capacity and TMP_surface: Correlation of 0.66
+
+-   capacity and DLWRF_surface: Correlation of 0.66
+
+-   hour and DSWRF_surface: Correlation of 0.65
+
+-   normalized_production and production: Correlation of 0.89 (since this is derived from production, it should not be used)
+
+**Variable Selection**:
+
+-   **Exclude**:
+
+    -   `normalized_production`: Highly correlated with `production` (derived from it).
+
+    -   `TMP_surface` or `hourly_max_t`: Choose one to avoid multicollinearity.
+
+    -   `DLWRF_surface`: Highly correlated with `TMP_surface` and `hourly_max_t`.
+
+    -   `USWRF_surface`: Highly correlated with `DSWRF_surface`.
+
+    -   `capacity`: Highly correlated with several other variables like `DSWRF_surface`, `hourly_max_t`, `TMP_surface`, and `DLWRF_surface`.
+
+    -   One of the categorical month dummy variables (if any): Since `month` is a numeric variable now.
+
+-   **Include**:
+
+    -   `production`: The target variable.
+
+    -   `DSWRF_surface`: An important predictor of solar power production.
+
+    -   `hourly_max_t`: Represents temperature, important for production.
+
+    -   `hour`: Represents the time of day, useful for capturing daily patterns.
+
+    -   `hourly_cloud_average`: Represents cloud cover, affecting production.
+
+    -   `CSNOW_surface`: Represents snow cover, affecting production.
+
+    -   `month`: To capture seasonal effects.
+
+# Forecast Models
+
+## 1. Linear Regression Models
+
+```{r}
+tday=today("Turkey")
+day_before_tday <- tday - 1
+#day_before_tday <- tday - 2
+prediction_day <- tday +1
+start_date <- as.Date("2024-02-01")
+end_date <- as.Date("2024-05-15")
+
+# Plot production data as a line graph
+plot(df$date, df$production, type = "l", xlab = "Date", ylab = "Production", main = "Production Data")
+```
+
+To make a prediction by using linear regression, our first attempt was to try to create an aggregate linear regression model by using the parameters defined above. In addition to these parameters, once the aggregate production plot was analyzed, one can clearly detect a shift in the production on the period approximately in between 01-06-2022 and 16-11-2022. To eliminate its effect in our model, we have defined special_period parameter as indicated below. Lastly, we can see a clear pattern where the production reaches up to capacity level of approximately 10 and does not go beyond that level.
+
+Since each hour has different production levels and its parameters take different values, we have created hourly-linear regressions to make forecasts for each hour seperately and eliminate hourly seasonality. We have prepared linear regression models for hours in between 4 & 18 since there is usually no production at hours 0,1,2,3 and 19,20,21,22,23. We have started our analysis by preparing a lm model including all the parameters introduced. After checking the summary and ACF plots of each hour, we have decided to include the ones with large significance and discard the insignificant ones from our model. For each hour, the same assumption was followed.
+
+After doing that, we have introduced another variable to capture the effect of lags (indicated as lag_1\_production). In most cases, lag time was selected as 1.
+
+### Hourly Analysis
+
+**Conclusion for Linear Regression Models:** Especially for the hours in between 7 and 16, linear regression models and WMAPE values performs better than other hours mainly depending on the sun-set & sun-rise period. Although we tried to fit the production into a linear regression model, we still observe high WMAPE values in hours 4,5,6,17 and 18 because of having limited amount of data.
+
+-   Hour 4: For hour 4, the linear regression model included parameters such as `lag_1_production`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `special_period`, and `trend_hour_4`. The model showed that `lag_1_production` and `special_period` were highly significant, indicating strong dependencies on the previous hour's production and specific periods. The model explained about 68.06% of the variability in production, but residuals analysis indicated periods of higher residuals and some autocorrelation, suggesting incomplete pattern capture. The WMAPE value of 1407.11% highlighted significant prediction errors, reflecting the challenges of modeling early morning production.
+
+-   Hour 5: For hour 5, the linear regression model included parameters like `lag_1_production`, `dlwrf_surface`, `is.ramadan`, `special_period`, `trend_hour_5`, and interactions between `month` and `hourly_max_t`. The model showed that `lag_1_production` and `special_period` were highly significant, indicating strong dependencies on the previous hour's production and specific periods. The model explained about 60.02% of the variability in production, but residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value of 154.10% highlighted significant prediction errors, especially during early morning hours.
+
+-   For hour 6, the linear regression model included parameters such as `lag_1_production`, `uswrf_top_of_atmosphere`, `wday`, `hourly_cloud_average`, `is.ramadan`, `special_period`, `is.religousday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production` and `special_period` as highly significant, indicating strong dependencies on the previous hour's production and specific periods. The model explained about 64.22% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 6 was lower than earlier hours, indicating better model performance as more data points were available. Future improvements could involve collecting more data, exploring advanced models, and refining feature engineering to further enhance accuracy.
+
+-   For hour 7, the linear regression model included parameters such as `lag_1_production`, `special_period`, `uswrf_surface`, `hourly_cloud_average`, `is.ramadan`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production` and `special_period` as highly significant, indicating strong dependencies on the previous hour's production and specific periods. The model explained about 58.23% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 7 was relatively high, indicating the need for further model improvements.
+
+-   For hour 8, the linear regression model included parameters such as `lag_1_production`, `uswrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.ramadan`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production` and `tmp_surface` as highly significant, indicating strong dependencies on the previous hour's production and temperature. The model explained about 61.47% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 8 was moderate, indicating a decent model performance but with room for improvement.
+
+-   For hour 9, the linear regression model included parameters such as `lag_1_production`, `tmp_surface`, `dlwrf_surface`, `hourly_cloud_average`, `is.ramadan`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production`, `tmp_surface`, and `dlwrf_surface` as highly significant, indicating strong dependencies on the previous hour's production and specific weather conditions. The model explained about 63.98% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 9 was moderate, indicating a decent model performance but with room for improvement.
+
+-   For hour 10, the linear regression model included parameters such as `lag_1_production`, `trend_hour_10`, `csnow_surface`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.religousday`, `is.nationalday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production`, `csnow_surface`, `dlwrf_surface`, `tmp_surface`, and `hourly_cloud_average` as highly significant, indicating strong dependencies on the previous hour's production and specific weather conditions. The model explained about 53.86% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 10 was 17.13%, indicating reasonable model performance.
+
+-   For hour 11, the linear regression model included parameters such as `lag_19_production`, `trend_hour_11`, `special_period`, `csnow_surface`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.religousday`, `is.nationalday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_19_production`, `csnow_surface`, `dlwrf_surface`, `tmp_surface`, and `hourly_cloud_average` as highly significant, indicating strong dependencies on the previous production and specific weather conditions. The model explained about 53.86% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 11 was 19.63%, indicating reasonable model performance.
+
+-   For hour 12, the linear regression model included parameters such as `lag_1_production`, `trend_hour_12`, `csnow_surface`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.religousday`, `is.nationalday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production`, `trend_hour_12`, `csnow_surface`, `dlwrf_surface`, `hourly_cloud_average`, and `is.weekend` as highly significant, indicating strong dependencies on the previous hour's production and specific weather conditions. The model explained about 53.84% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 12 was 24.15%, indicating reasonable model performance.
+
+-   For hour 13, the linear regression model included parameters such as `lag_1_production`, `trend_hour_13`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.nationalday`, `is.publicholiday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_1_production`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.nationalday`, and `is.publicholiday` as highly significant, indicating strong dependencies on the previous hour's production and specific weather and calendar conditions. The model explained about 55.76% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 13 was 23.93%, indicating reasonable model performance.
+
+-   For hour 14, the linear regression model included parameters such as `lag_14_production`, `trend_hour_14`, `special_period`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.ramadan`, `is.religousday`, `is.nationalday`, `is.publicholiday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_14_production`, `special_period`, `dlwrf_surface`, `tmp_surface`, `hourly_cloud_average`, `is.weekend`, `is.nationalday`, and `is.publicholiday` as highly significant, indicating strong dependencies on the previous hour's production and specific weather and calendar conditions. The model explained about 57.38% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 14 was 25.24%, indicating reasonable model performance.
+
+-   For hour 15, the linear regression model included parameters such as `lag_15_production`, `trend_hour_15`, `special_period`, `dswrf_surface`, `uswrf_top_of_atmosphere`, `dlwrf_surface`, `hourly_cloud_average`, `tmp_surface`, `is.weekend`, `is.ramadan`, `is.publicholiday`, and interactions between `month` and `hourly_max_t`. The model showed `lag_15_production`, `trend_hour_15`, `special_period`, `dswrf_surface`, `uswrf_top_of_atmosphere`, `dlwrf_surface`, `hourly_cloud_average`, and `is.publicholiday` as highly significant, indicating strong dependencies on the previous hour's production, specific periods, and weather conditions. The model explained about 67.37% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 15 was 31.63%, indicating reasonable model performance.
+
+-   For hour 16, the linear regression model included parameters such as `lag_16_production`, `trend_hour_16`, `special_period`, `dswrf_surface`, `uswrf_top_of_atmosphere`, `hourly_cloud_average`, `is.ramadan`, and interactions between `month` and `hourly_max_t`. The model showed `lag_16_production`, `trend_hour_16`, `special_period`, `dswrf_surface`, `uswrf_top_of_atmosphere`, `hourly_cloud_average`, and `is.ramadan` as highly significant, indicating strong dependencies on the previous hour's production, specific periods, and weather conditions. The model explained about 68.28% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 16 was 39.61%, indicating reasonable model performance.
+
+-   For hour 17, the linear regression model included parameters such as `lag_17_production`, `trend_hour_17`, `special_period`, `is.ramadan`, `is.religousday`, `uswrf_surface`, `uswrf_top_of_atmosphere`, `dswrf_surface`, and interactions between `month` and `hourly_max_t`. The model showed `lag_17_production`, `trend_hour_17`, `special_period`, `is.ramadan`, and `dswrf_surface` as highly significant, indicating strong dependencies on the previous hour's production, specific periods, and weather conditions. The model explained about 67.59% of the variability in production. Residuals analysis indicated some autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 17 was 61.69%, indicating reasonable model performance.
+
+-   For hour 18, the linear regression model included parameters such as `lag_18_production`, `trend_hour_18`, `special_period`, `tmp_surface`, `dswrf_surface`, and interactions between `month` and `hourly_max_t`. The model showed `lag_18_production`, `special_period`, `tmp_surface`, and various monthly interactions as highly significant, indicating strong dependencies on the previous hour's production, specific periods, and weather conditions. The model explained about 19.77% of the variability in production, indicating a lower explanatory power compared to other hours. Residuals analysis indicated significant autocorrelation, suggesting that not all patterns were captured. The WMAPE value for hour 18 was 87.69%, highlighting challenges in modeling production for this hour.
+
+## 2. ARIMA Models
+
+ARIMA models ( Autoregressive Integrated Moving Average models) are widely used for predicting future trends. These models use lagged moving averages to smooth the given time series data input and assume that the future will be similar to past trends. This assumption creates a weakness for ARIMA models such that the model cannot predict rapid shock conditions. In this project, the input time series is aggregated hourly sun energy production levels throughout 25 different locations. The assumption during prediction phase was that on day d, the predictions were needed for day d+1 and the production values until the end of day d-1 was known. Additionally, since it was known in the given data set that the sun energy production levels for hours 0,1,2,3,19,20,21,22,23 were 0 for all days, ARIMA model was used to predict hours starting with 4 up to 18. The first step was to use an ARIMA model for overall data, without separating it into hourly data sets.
+
+However, fitting one ARIMA model to every hour ended up performing poorly for predicting hours individually since each hour's pattern was different according to their plots given below. While some hours like hour 4,5 and 18 had very non-consistent patterns; hours from mid-day had consistent seasonal patterns. Therefore, fitting one ARIMA model to different patterns of all hours naturally caused a poor performance. To resolve this, individual ARIMA models were fitted to hourly data sets.
+
+We firstly tried the same logic as forecasting for one day as we did in competition phase but then we realized we needed to use rolling forecasts to make our forecasts more precised. Without using randomly chosen test date data sets our forecasts started to give the same results after a short amount of time. Therefore, rolling dates were used to forecast later on.
+
+**Conclusion of ARIMA Models**
+
+Since the WMAPE value for hour-specific ARIMA model which is 49.22645 was lesser than WMAPE value of overall ARIMA model which is 438.16943, hour-specific ARIMA models were chosen for forecasting.
+
+# Conclusion
+
+The process of making predictions using linear regression models in this project involved several key steps to address the unique challenges of forecasting solar energy production across different hours of the day. Initially, an aggregate linear regression model was considered, but the variability and shifts in production patterns led to the creation of hourly-specific models to capture the distinct characteristics and seasonality of each hour.
+
+#### Key Findings
+
+1.  **Aggregate Model Limitations**:
+
+    -   The aggregate model highlighted the need to account for specific periods and capacity constraints in production, leading to the introduction of the `special_period` parameter.
+
+    -   A clear capacity level was identified, necessitating the need for hour-specific models to handle the variability more effectively.
+
+2.  **Hourly-Specific Linear Regression Models**:
+
+    -   Separate linear regression models were developed for each hour from 4 to 18, as production was zero during the other hours.
+
+    -   Each model included significant parameters tailored to the specific hour, such as lagged production, weather conditions, and calendar effects.
+
+    -   The inclusion of lagged production (e.g., `lag_1_production`) helped capture dependencies on previous hours' production, improving model accuracy for several hours.
+
+3.  **Model Performance**:
+
+    -   The linear regression models performed better during the mid-day hours (7 to 16), where solar production was more consistent and less variable.
+
+    -   Hours 4, 5, 6, 17, and 18 showed higher WMAPE values, indicating challenges due to limited data and higher variability in production.
+
+    -   Notably, the models for hours 10 to 16 generally showed reasonable WMAPE values, reflecting better performance during peak solar production periods.
+
+4.  **Residuals Analysis**:
+
+    -   Residuals analysis across the models indicated some degree of autocorrelation, suggesting that not all patterns were fully captured.
+
+    -   Improvements in model accuracy could involve further refinement of feature engineering and exploration of advanced models to address residual autocorrelation.
+
+#### Conclusion of Linear Regression Models
+
+Overall, the linear regression models provided a framework for understanding the factors influencing solar production on an hourly basis. While they captured significant dependencies and provided reasonable forecasts for mid-day hours, the variability in early morning and late afternoon hours posed challenges. Future work could focus on incorporating more advanced models and additional data to enhance accuracy.
+
+#### Conclusion of ARIMA Models
+
+ARIMA models proved effective for hours with stable production patterns, offering better performance in terms of WMAPE values compared to linear regression models. However, their limitation in handling rapid changes highlighted the need for hybrid approaches or more advanced forecasting techniques to address the variability in solar energy production.
+
+### Overall Conclusion
+
+This project underscored the complexity of predicting solar energy production and the necessity of tailored models for different hours of the day. Both linear regression and ARIMA models had their strengths and limitations, with ARIMA models showing better overall performance. Future efforts should focus on combining the strengths of different modeling approaches and incorporating additional data to enhance the robustness and accuracy of solar energy forecasts.
+
+ARIMA models are good at forecasting for data that will not have rapid changes in the future, and this project showed us during the competition phase that some days could have rapid shocks. ARIMA models can't respond well to those shocks due to their feature of making predictions by fitting past value patterns to the future. But it had a better performance in terms of WMAPE values when compared to linear regression model we used, so hourly specific ARIMA was our final choice.
+
+## Appendix
+
+-   Explained,-Hourly-Linear-Reg-without-WMAPE: Hourly explained linear regression but not included WMAPE calculations
+
+-   Hourly Linear Reg with WMAPE: Hourly linear regression but not included comments and explanations
+
+-   ARIMA: Detailed codes and explanations of ARIMA models
+
+*Note: For the information of the readers, this paper has been refined for coherence and citation accuracy with the assistance of ChatGPT and other language models.*

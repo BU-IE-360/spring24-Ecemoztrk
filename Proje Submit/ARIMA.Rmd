@@ -1,0 +1,773 @@
+---
+title: "project-arima"
+author: "rst"
+date: "2024-06-02"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## SECTION 1: Data Preparation
+
+
+```{r}
+library(forecast)
+library(data.table)
+library(lubridate)
+library(dplyr)
+library(tidyr)
+library(GGally)
+library(matrixStats)
+library(zoo)
+library(readxl)
+library(openxlsx)
+library(writexl)
+
+tday=today("Turkey")
+
+day_before_tday <- tday - 1
+
+file_weather = paste0("/Users/serratopaloglu/Desktop/daily/may25_w.csv")
+file_production = paste0("/Users/serratopaloglu/Desktop/daily/may25.csv")
+
+weather_data = fread(file_weather)
+production_data = fread(file_production)
+
+# getting full weather date and hours as a template
+template_dt = unique(weather_data[,list(date,hour)])
+template_dt = merge(template_dt,production_data,by=c('date','hour'),all.x=T)
+template_dt = template_dt[date<=(tday + 1)]
+#template_dt = template_dt[date<=(tday)]
+
+
+###NA VALUES###
+any_na <- anyNA(weather_data)
+if (any_na) {
+  cat("The dataset contains NA values.\n")
+  # Display the count of NAs per column
+  print(colSums(is.na(weather_data)))
+} else {
+  cat("The dataset does not contain any NA values.\n")
+}
+# Display all rows that have NA values
+na_rows <- weather_data[!complete.cases(weather_data), ]
+#View(na_rows)
+
+# Fill NA values with the average of the surrounding values (linear interpolation)
+merged_data_filled <- weather_data %>%
+  mutate(across(where(is.numeric), ~ na.approx(.x, na.rm = FALSE)))
+
+# Fill leading NAs with the next available value, upward
+merged_data_filled <- merged_data_filled %>%
+  mutate(across(where(is.numeric), ~ na.locf(.x, fromLast = TRUE, na.rm = FALSE)))
+
+weather_data<- merged_data_filled
+#####
+
+
+#Coordinate aggregation by long to wide format
+long_weather <- weather_data
+long_weather <- melt(weather_data,id.vars=c(1:4))
+hourly_region_averages = dcast(long_weather, date+hour~variable,fun.aggregate=mean)
+#View(hourly_region_averages)
+
+# Merge with hourly_region_averages
+template_dt_with_weather <- merge(template_dt, hourly_region_averages, by = c('date', 'hour'), all.x = TRUE)
+#View(template_dt_with_weather)
+#Order it by date and hour
+template_dt_with_weather = template_dt_with_weather[order(date,hour)]
+template_dt_with_aggregate <- template_dt_with_weather
+
+template_dt_with_aggregate$hourly_cloud_average <- rowMeans(dplyr::select(template_dt_with_aggregate, starts_with("tcdc_")), na.rm = TRUE)
+template_dt_with_aggregate$hourly_max_t <- rowMaxs(as.matrix(dplyr::select(template_dt_with_aggregate, starts_with("tmp_"))), na.rm = TRUE)
+# Identify columns with 'tmp_' prefix
+tmp_columns <- grep("^tmp_", names(template_dt_with_aggregate))
+
+# Extract the subset of columns
+tmp_data <- template_dt_with_aggregate[, ..tmp_columns]
+
+# Convert data frame to matrix
+tmp_matrix <- as.matrix(tmp_data)
+
+# Calculate row maximums
+template_dt_with_aggregate$hourly_max_t <- rowMaxs(tmp_matrix, na.rm = TRUE)
+
+#View(template_dt_with_aggregate)
+
+
+# Use select to exclude coumns starting with "tcdc_" to focus on average
+template_dt_with_aggregate <- template_dt_with_aggregate %>%
+  dplyr::select(-starts_with("tcdc_"))
+#-starts_with("tmp_"))
+
+# Read your holiday dataset
+
+
+holiday_data <- read_excel("/Users/serratopaloglu/Desktop/daily/Short Holiday12.xlsx")
+# Convert date column to Date format
+holiday_data$date <- as.Date(holiday_data$date, format = "%d.%m.%Y", na.rm = TRUE)
+
+# Merge holiday data with production dataset based on the date column
+all_data <- merge(template_dt_with_aggregate, holiday_data, by = "date", all.x = TRUE)
+
+```
+## SECTION 1.1 : Analyzing the given production data and making it stationary
+
+All of the data does not give a visually visible seasonal or trend pattern. Therefor to make it easier to see these patterns we used 2 years of data starting from Feb 1 2022 ending in May 1 2024. ACF plot has seasonal patterns which indicates data is not stationary. KPSS test will also be applied to see if it is stationary or not. And then the data will be decomposed to detect trend and seasonality patterns. Moving average with time window 24 was used due to hourly trend. 
+
+```{r}
+#Checking if it is stationary or not 
+
+available_data = all_data[!is.na(production) & hour >= 4 & hour <= 18,]
+acf(available_data$production)
+
+library(tseries)
+
+# Perform the KPSS test
+kpss_result <- kpss.test(available_data$production)
+print(kpss_result)
+
+
+
+# Specify start and end dates
+start_date <- as.Date("2022-02-01")
+end_date <- as.Date("2024-05-01")
+
+# Subset data within the specified date range
+subset_data <- available_data[available_data$date >= start_date & available_data$date <= end_date, ]
+
+# Plot the hourly production data against hour
+plot(subset_data$hour, subset_data$production, 
+     main = "Hourly Production vs Hour of the Day",
+     ylab = "Hourly Production",
+     xlab = "Hour of the Day")
+
+
+
+str(available_data$production)
+summary(available_data$production)
+sum(is.na(available_data$production))
+
+
+# We will use moving average to find the trend component of the time series we have. 
+
+# Define window size for the moving average
+window_size <- 24  # For hourly data, you might choose 24 for a daily moving average
+
+# Calculate the moving average (trend component)
+moving_avg <- stats::filter(subset_data$production, rep(1/window_size, window_size), sides = 2)
+
+# Calculate the seasonal component by subtracting the trend from the original data
+seasonal_component <- subset_data$production - moving_avg
+
+# Plot original data
+plot(subset_data$production, type = "l", col = "blue", xlab = "Time", ylab = "Production")
+title("Original Data")
+
+# Plot trend component
+plot(moving_avg, type = "l", col = "red", xlab = "Time", ylab = "Trend")
+title("Trend Component")
+
+# Plot seasonal component
+plot(seasonal_component, type = "l", col = "green", xlab = "Time", ylab = "Seasonal Component")
+title("Seasonal Component")
+
+
+# Detrend the original data by subtracting the trend component
+detrended_data <- subset_data$production - moving_avg
+# Assuming your data is in a dataframe called 'available_data' with columns 'date' and 'production'
+
+# Convert the date column to Date format
+available_data$date <- as.Date(available_data$date)
+
+# Taking differences according to the ACF plot and seasonality of the data
+
+
+acf(available_data$production,lag=60)
+
+a_data <- diff(available_data$production,lag=360)
+
+acf(a_data,lag.max=60)
+
+b_data <- diff(a_data,lag=15)
+acf(b_data,lag.max=60)
+
+##. b_data seems to be relatively stationary. KPSS test results also confirm this. 
+
+kpss_result <- kpss.test(b_data)
+print(kpss_result)
+
+```
+
+## SECTION 2: ARIMA models
+
+ARIMA models ( Autoregressive Integrated Moving Average models) are widely used for predicting future trends. These models use lagged moving averages to smooth the given time series data input and assume that the future will be similar to past trends. This assumption creates a weakness for ARIMA models such that the model cannot predict rapid shock conditions. In this project, the input time series is aggregated hourly sun energy production levels throughout 25 different locations. The assumption during prediction phase was that on day d, the predictions were needed for day d+1 and the production values until the end of day d-1 was known. Additionally, since it was known in the given data set that the sun energy production levels for hours 0,1,2,3,19,20,21,22,23 were 0 for all days, ARIMA model was used to predict hours starting with 4 up to 18. The first step was to use an ARIMA model for overall data, without separating it into hourly data sets.Below is a snippet of base code we used for predicting a day. The example is to show how we forecasted May 26 while we were in May 25.
+
+```{r}
+#Defining today and the day before today.
+tday="2024-05-25" #The we are using has production values up to May 24, so the predictions will be made for May 26 as if we are in May 25.
+day_before_tday <- "2024-05-24"
+
+today("Turkey")
+#Creating the data set that will be used for ARIMA forecasting. to_be_forecasted data set is for extracting the days that will be forecasted. 
+all_data = all_data[!is.na(production)]
+
+available_data = all_data[!is.na(production) & hour >= 4 & hour <= 18,]
+to_be_forecasted = template_dt_with_weather[is.na(production) & hour >= 4 & hour <= 18 & date < "2024-05-27" ]
+#Constructing an overall ARIMA model for the available_data.
+fitted <- auto.arima(available_data$production, trace=TRUE)
+
+# Forecasting
+forecast_horizon <- nrow(to_be_forecasted)
+forecasted_arima <- forecast(fitted, h = forecast_horizon)$mean
+
+# Setting negative forecasts to zero
+forecasted_arima[forecasted_arima < 0] <- 0
+
+# Storing forecasts in a table
+forecast_table <- data.frame(date = to_be_forecasted$date, 
+                             hour = to_be_forecasted$hour, 
+                             arima_forecast = forecasted_arima)
+
+# Ordering the forecast table by date and hour
+forecast_table <- forecast_table[order(forecast_table$date, forecast_table$hour), ]
+
+# Tomorrow's hourly predictions
+day_ahead_forecast <- forecast_table[forecast_table$date == ("2024-05-26"), ]
+
+print(day_ahead_forecast)
+
+
+```
+
+
+
+## SECTION 2.1: Forecasting for Hours Individually Option
+
+However, fitting one ARIMA model to every hour ended up performing poorly for predicting hours individually since each hour's pattern was different according to their plots given below. While some hours like hour 4,5 and 18 had very non-consistent patterns; hours from mid-day had consistent seasonal patterns. Therefore, fitting one ARIMA model to different patterns of all hours naturally caused a poor performance. To resolve this, individual ARIMA models were fitted to hourly data sets. In the below code, a for loop is used to iterate through hours between 4 and 18 to fit an ARIMA model. Below is a snippet of code that shows how we forecasted May 26 while we were in May 25. These codes are just to show our forecasting process for the competition phase, evaluation and comparison of these models will be shown in section 3.
+
+```{r}
+df <- available_data
+
+hour4 <- df[df$hour == 4, ]
+hour5 <- df[df$hour == 5, ]
+hour6 <- df[df$hour == 6, ]
+hour7 <- df[df$hour == 7, ]
+hour8 <- df[df$hour == 8, ]
+hour9 <- df[df$hour == 9, ]
+hour10 <- df[df$hour == 10, ]
+hour11 <- df[df$hour == 11, ]
+hour12 <- df[df$hour == 12, ]
+hour13 <- df[df$hour == 13, ]
+hour14 <- df[df$hour == 14, ]
+hour15 <- df[df$hour == 15, ]
+hour16 <- df[df$hour == 16, ]
+hour17 <- df[df$hour == 17, ]
+hour18 <- df[df$hour == 18, ]
+
+plot(hour4$date, hour4$production, type = "l",
+     main = "Production at Hour 4",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour5$date, hour5$production, type = "l",
+     main = "Production at Hour 5",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour6$date, hour6$production, type = "l",
+     main = "Production at Hour 6",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour7$date, hour7$production, type = "l",
+     main = "Production at Hour 7",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour8$date, hour8$production, type = "l",
+     main = "Production at Hour 8",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour9$date, hour9$production, type = "l",
+     main = "Production at Hour 9",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour10$date, hour10$production, type = "l",
+     main = "Production at Hour 10",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour11$date, hour11$production, type = "l",
+     main = "Production at Hour 11",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour12$date, hour12$production, type = "l",
+     main = "Production at Hour 12",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour13$date, hour13$production, type = "l",
+     main = "Production at Hour 13",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour14$date, hour14$production, type = "l",
+     main = "Production at Hour 14",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour15$date, hour15$production, type = "l",
+     main = "Production at Hour 15",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour16$date, hour16$production, type = "l",
+     main = "Production at Hour 16",
+     xlab = "Date",
+     ylab = "Production")
+
+plot(hour17$date, hour17$production, type = "l",
+     main = "Production at Hour 17",
+     xlab = "Date",
+     ylab = "Production")
+
+
+plot(hour18$date, hour18$production, type = "l",
+     main = "Production at Hour 18",
+     xlab = "Date",
+     ylab = "Production")
+```
+
+
+
+## SECTION 3: ARIMA MODELS EVALUATION AND COMPARISON BETWEEN FEBRUARY 1 AND MAY 15
+
+To evaluate which ARIMA model would be the better model to use, a data set between February 1 2024 and May 15 2024 was used to evaluate metrics for overall ARIMA model and hour-specific ARIMA model. Below code calculates forecasts for using overall ARIMA model which means fitting ONE Arima model for all hours.
+
+## SECTION 3.1 FORECASTING WITH ONE ARIMA MODEL
+
+
+
+The code below shows our overall ARIMA Model's predictions for the phase between February 1 2024 and May 15 2024. The results showed that the overall ARIMA model lacked precision especially in the hours at the edges of our interval such as hour 4,5 and 17,18. These hours were predicted around 2 and 3 that are values greater than the actual values that were always between 0 and 1 in the historical data. In addition, we used rolling forecasts.
+
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+### FORECASTING 
+
+library(forecast)
+library(data.table)
+
+# Ensuring the data is in data.table format for easier handling
+all_data <- as.data.table(all_data)
+template_dt_with_weather <- as.data.table(template_dt_with_weather)
+
+# Define the date range for forecasting
+start_date <- as.Date("2024-02-01")
+end_date <- as.Date("2024-05-15")
+
+# Define a vector of test dates
+test_dates <- seq(start_date, end_date, by = "day")
+
+# Initialize a list to store forecast results
+forecast_results <- list()
+
+# Loop over test dates
+for (test_date in test_dates) {
+    # Filter data to be forecasted for the current test date
+    to_be_forecasted <- template_dt_with_weather[!is.na(production) & hour >= 4 & hour <= 18 & date == test_date]
+
+    # Check if there is any data to be forecasted
+    if (nrow(to_be_forecasted) == 0) next
+    
+    # Filter available data within the specified hours and up to the current test date, removing NA values
+    available_data <- all_data[!is.na(production) & hour >= 4 & hour <= 18 & date < test_date]
+
+    # Check if there is sufficient available data to build the model
+    if (nrow(available_data) == 0) next
+
+    # Constructing an ARIMA model for the available data
+    fitted <- suppressWarnings(suppressMessages(auto.arima(available_data$production, trace = TRUE)))
+
+    # Forecasting for the specified horizon
+    forecast_horizon <- nrow(to_be_forecasted)
+    forecasted_arima <- suppressWarnings(suppressMessages(forecast(fitted, h = forecast_horizon)$mean))
+
+    # Setting negative forecasts to zero
+    forecasted_arima[forecasted_arima < 0] <- 0
+
+    # Storing forecasts in a table
+    forecast_table <- data.table(date = to_be_forecasted$date, 
+                                 hour = to_be_forecasted$hour, 
+                                 arima_forecast = forecasted_arima)
+
+    # Ordering the forecast table by date and hour
+    setorder(forecast_table, date, hour)
+
+    # Add the forecast result to the list
+    forecast_results[[as.character(test_date)]] <- forecast_table
+}
+
+# Combine all forecast results into a single dataframe or list
+overall_results <- rbindlist(forecast_results)
+
+# Print or further analyze the forecast results
+#print(overall_results)
+
+#write.xlsx(overall_results, "overall_results.xlsx", 
+           #asTable = TRUE, showNA = FALSE, digits = 10)
+```
+
+
+
+## Preparing for evaluating overall ARIMA Model with calculating MAE and WMAPE value.
+These values are put beforehand to help for the evaluation metric calculations later for general arima model.
+to_be_forecasted$production is the actual production values in this context. WMAPE calculations will be used to compare models in section 4.
+
+```{r message=FALSE, warning=FALSE}
+
+library(readxl)
+library(openxlsx)
+
+overall_results <- read_excel("overall_results.xlsx", sheet = 1)
+to_be_forecasted <- template_dt_with_weather[!is.na(production) & hour >= 4 & hour <= 18 & date >= start_date & date <= end_date, ]
+
+# Create a time series object
+ts_forecasts <- ts(overall_results$arima_forecast, frequency = 24)  # Assuming the data is hourly
+
+# Verify the length and properties of the time series object
+length(ts_forecasts)
+attributes(ts_forecasts)
+# Convert to_be_forecasted$production to numeric
+to_be_forecasted$production <- as.numeric(to_be_forecasted$production)
+
+# Convert ts_forecasts to numeric
+ts_forecasts <- as.numeric(ts_forecasts)
+
+# Perform subtraction
+result <- to_be_forecasted$production - ts_forecasts
+
+data_overall <- to_be_forecasted$production - ts_forecasts
+
+
+```
+## SECTION 3.2 Evaluating hour-specific ARIMA Model.
+
+
+The code below shows our chosen hour-specific ARIMA Model's predictions for the phase between February 1 2024 and May 15 2024. We firstly tried the same logic as forecasting for one day as we did in competition phase but then we realized we needed to use rolling forecasts to make our forecasts more precised. Without using randomly chosen test date data sets our forecasts started to give the same results after a short amount of time. Therefore, rolling dates were used to forecast later on. The code right below named as "Dismissed Code" was eliminated and " Rolling Code " was used.
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+###                ###
+### DISMISSED CODE ###
+###                ###
+
+
+start_date <- as.Date("2024-02-01")
+end_date <- as.Date("2024-05-15")
+
+#Creating the data set that will be used for ARIMA forecasting. to_be_forecasted data set is for extracting the days that will be forecasted. The data is separated for the days that will be predicted up to Feb 1 to May 15. Since the data we were given had the actual production values between February 1 2024 and May 15 2024, available_data and  to_be_forecasted data set were created in a way such that available_data only included the data before February 1 2024 and to_be_forecasted data had the data between February 1 2024 and May 15 2024.
+
+all_data = all_data[!is.na(production)]
+available_data <- all_data[!is.na(production) & hour >= 4 & hour <= 18 & date < start_date,]
+to_be_forecasted <- template_dt_with_weather[!is.na(production) & hour >= 4 & hour <= 18 & date >= start_date & date <= end_date, ]
+
+# Same forecasting approach was used for these dates as well. A for loop is used to iterate through each day.
+
+# Initialize an empty list to store forecast results
+forecast_results <- list()
+
+# Iterate over the list of hours
+for (i in 4:18) {
+  # Isolate the data for the current hour
+  hour_data <- available_data[available_data$hour == i, ]
+  # Fit an ARIMA model to the hour-specific data
+  fitted <- auto.arima(hour_data$production, trace = TRUE)
+  # Determine the number of forecasts needed for the current hour
+  forecast_horizon <- nrow(to_be_forecasted[to_be_forecasted$hour == i, ])
+  # Forecast production using the hour-specific ARIMA model
+  forecasted_arima <- forecast(fitted, h = forecast_horizon)$mean
+  # Ensure no negative forecasts
+  forecasted_arima[forecasted_arima < 0] <- 0
+  # Create a data frame for the forecast results for the current hour
+  forecast_table_hour <- data.frame(
+    date = to_be_forecasted[to_be_forecasted$hour == i, ]$date,
+    hour = to_be_forecasted[to_be_forecasted$hour == i, ]$hour,
+    arima_forecast = forecasted_arima
+  )
+  # Add the forecast results to the list
+  forecast_results[[as.character(i)]] <- forecast_table_hour
+  print(fitted)
+}
+
+# Combine all the forecast results into a single data frame
+forecast_results_df <- lapply(forecast_results, as.data.frame)
+
+# Combine all forecast results into a single data frame
+combined_forecasts <- bind_rows(forecast_results_df)
+
+# Arrange the combined forecasts
+combined_forecasts_sorted <- combined_forecasts %>%
+  arrange(date, hour)
+
+# Apply formatting function to all numeric columns to remove scientific notation
+combined_forecasts_sorted <- combined_forecasts_sorted %>%
+  mutate(across(where(is.numeric), ~ format(.x, scientific = FALSE)))
+
+combined_forecasts_sorted
+
+# Write the sorted forecast results to an Excel file if one wants to analyze.
+write.xlsx(combined_forecasts_sorted, "forecasts_sorted.xlsx", 
+           #asTable = TRUE, showNA = FALSE, digits = 10)
+
+
+
+
+```
+#### CONTINUED
+
+```{r}
+library(readxl)
+library(openxlsx)
+
+combined_forecasts_sorted <- read_excel("forecasts_sorted.xlsx", sheet = 1)
+start_date <- as.Date("2024-02-01")
+end_date <- as.Date("2024-05-15")
+
+available_dataa <- all_data[!is.na(production) & hour >= 4 & hour <= 18 & date >= start_date & date <= end_date, ]
+available_dataa_subset <- subset(available_dataa, select = c(date, hour, production))
+
+combined_forecasts_sorted$hour <- as.integer(combined_forecasts_sorted$hour)
+
+
+
+
+combined_data <- merge(available_dataa_subset, combined_forecasts_sorted, by = c("date", "hour"), all.x = TRUE)
+combined_data$arima_forecast <- combined_forecasts_sorted$arima_forecast
+combined_data
+combined_data$hour <- as.integer(combined_data$hour)
+combined_data$production <- as.numeric(combined_data$production)
+
+
+
+write.xlsx(combined_data, "project_values.xlsx", 
+           asTable = TRUE, showNA = FALSE, digits = 10)
+
+
+```
+
+
+#### SECTION 3.2.1 ROLLING FORECASTING WITH HOUR SPECIFIC ARIMA
+
+```{r eval=FALSE, include=FALSE}
+###                ###
+### ROLLING CODE.  ###
+###                ###
+library(forecast)
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(writexl)
+
+# Ensuring the data is in data.table format for easier handling
+all_data <- as.data.table(all_data)
+template_dt_with_weather <- as.data.table(template_dt_with_weather)
+combined_data <- read_excel("project_values.xlsx", sheet = 1)
+
+# Define the date range for forecasting
+start_date <- as.Date("2024-02-01")
+end_date <- as.Date("2024-05-15")
+
+# Define a vector of test dates
+test_dates <- seq(start_date, end_date, by = "day")
+
+# Initialize a list to store forecast results
+forecast_results <- list()
+
+# Loop over test dates
+for (test_date in test_dates) {
+    # Initialize a list to store hourly forecasts
+    hourly_forecasts <- list()
+    
+    # Loop over each hour from 4 AM to 6 PM
+    for (current_hour in 4:18) {
+        # Filter data to be forecasted for the current test date and hour
+        to_be_forecasted <- template_dt_with_weather[!is.na(production) & hour == current_hour & date == test_date]
+        
+        # Check if there is any data to be forecasted
+        if (nrow(to_be_forecasted) == 0) next
+        
+        # Filter available data for the current hour and up to the current test date, removing NA values
+        available_data <- all_data[!is.na(production) & hour == current_hour & date < test_date]
+        
+        # Check if there is sufficient available data to build the model
+        if (nrow(available_data) == 0) next
+        
+        # Constructing an ARIMA model for the available data
+        fitted <- auto.arima(available_data$production, trace = TRUE)
+        
+        # Forecasting for the specified horizon
+        forecast_horizon <- nrow(to_be_forecasted)
+        forecasted_arima <- forecast(fitted, h = forecast_horizon)$mean
+        
+        # Setting negative forecasts to zero
+        forecasted_arima[forecasted_arima < 0] <- 0
+        forecasted_arima <- as.numeric(format(forecasted_arima, scientific = FALSE))
+        # Storing forecasts in a table
+        forecast_table <- data.table(date = to_be_forecasted$date, 
+                                     hour = to_be_forecasted$hour, 
+                                     arima_forecast = forecasted_arima)
+        
+        # Add the hourly forecast to the list
+        hourly_forecasts[[as.character(current_hour)]] <- forecast_table
+    }
+    
+    # Combine hourly forecasts into a single table for the current test date
+    if (length(hourly_forecasts) > 0) {
+        daily_forecast <- rbindlist(hourly_forecasts)
+        forecast_results[[as.character(test_date)]] <- daily_forecast
+    }
+}
+
+# Combine all forecast results into a single dataframe
+overall_results <- rbindlist(forecast_results)
+
+# Print or further analyze the forecast results
+#print(overall_results)
+
+
+#write.xlsx(overall_results, "results_rolling_2.xlsx", 
+           #asTable = TRUE, showNA = FALSE, digits = 10)
+
+
+
+```
+
+## SECTION 3.2.2 CHECKING RESIDUALS FOR HOUR SPECIFIC ARIMA MODEL
+
+```{r}
+# Ensure the necessary libraries are loaded
+library(forecast)
+library(data.table)
+library(readxl)
+library(openxlsx)
+combined_data <- read_excel("project_values.xlsx", sheet = 1)
+rolling_data <- read_excel("/Users/serratopaloglu/Desktop/results_rolling_2.xlsx")
+
+
+# Assuming combined_data and rolling_data are data tables/data frames
+# and they have columns 'production' and 'arima_forecast' respectively
+
+# Calculate the residuals
+residuals <- combined_data$production - rolling_data$arima_forecast
+# Remove NA values for analysis
+valid_indices <- !is.na(residuals)
+cleaned_residuals <- residuals[valid_indices]
+
+# Plotting the residuals
+par(mfrow = c(2, 2))  # Set up a 2x2 plotting area
+
+# Residual Plot
+plot(cleaned_residuals, main = "Residuals", ylab = "Residuals", xlab = "Index")
+
+# ACF Plot
+acf(cleaned_residuals, main = "ACF of Residuals")
+
+# Normal Q-Q Plot
+qqnorm(cleaned_residuals, main = "Normal Q-Q Plot of Residuals")
+qqline(cleaned_residuals, col = "red")
+
+# Histogram of Residuals
+hist(cleaned_residuals, main = "Histogram of Residuals", xlab = "Residuals", breaks = 20)
+
+# Reset the plotting area
+par(mfrow = c(1, 1))
+
+```
+
+## SECTION 3.2.3 CHECKING RESIDUALS FOR GENERAL ARIMA MODEL
+```{r}
+library(forecast)
+library(data.table)
+
+# Assuming combined_data and rolling_data are data tables/data frames
+# and they have columns 'production' and 'arima_forecast' respectively
+
+# Calculate the residuals
+residuals <- data_overall
+combined_data <- read_excel("project_values.xlsx", sheet = 1)
+# Remove NA values for analysis
+valid_indices <- !is.na(residuals)
+cleaned_residuals <- residuals[valid_indices]
+
+# Plotting the residuals
+par(mfrow = c(2, 2))  # Set up a 2x2 plotting area
+
+# Residual Plot
+plot(cleaned_residuals, main = "Residuals", ylab = "Residuals", xlab = "Index")
+
+# ACF Plot
+acf(cleaned_residuals, main = "ACF of Residuals")
+
+# Normal Q-Q Plot
+qqnorm(cleaned_residuals, main = "Normal Q-Q Plot of Residuals")
+qqline(cleaned_residuals, col = "red")
+
+# Histogram of Residuals
+hist(cleaned_residuals, main = "Histogram of Residuals", xlab = "Residuals", breaks = 20)
+
+# Reset the plotting area
+par(mfrow = c(1, 1))
+```
+
+
+## SECTION 4: EVALUATING ARIMA MODELS'S PERFORMANCE WITH METRICS 
+
+The code below calculates the weighted mean absolute percentage error for our forecasts (WMAPE). 
+```{r}
+#CALCULATING MAE FOR HOURLY ARIMA
+combined_data <- read_excel("project_values.xlsx", sheet = 1)
+x <- mean(abs(combined_data$production-rolling_data$arima_forecast))
+print(paste("MAE for hourly ARIMA:", x))
+
+## Calculating WMAPE HOURLY ARIMA
+
+to_be_forecasted = template_dt_with_weather[!is.na(production) & hour >= 4 & hour <= 18 & date < "2024-05-16 "& date > "2024-01-31" ]
+rolling_data <- read_excel("/Users/serratopaloglu/Desktop/results_rolling_2.xlsx")
+rolling_data$arima_forecast <- as.numeric(rolling_data$arima_forecast)
+combined_data$arima_forecast <- as.numeric(combined_data$arima_forecast)
+
+b <- sum(abs(combined_data$production-combined_data$arima_forecast))
+print(paste("WMAPE for hourly arima:",b/sum(to_be_forecasted$production)*100))
+
+#CALCULATING MAE FOR GENERAL ARIMA
+
+y <- mean(abs(data_overall))
+print(paste("MAE for general ARIMA:", y))
+
+## Calculating WMAPE GENERAL ARIMA
+
+d <- sum(abs(data_overall))
+f <- sum(to_be_forecasted$production)
+
+z <- d/f*100
+print(paste("WMAPE for general arima:",z))
+```
+## CONCLUSION OF ARIMA MODELS
+
+Since the WMAPE value for hour-specific ARIMA model which is 49.22645 was lesser than WMAPE value of overall ARIMA model which is 438.16943, hour-specific ARIMA models were chosen for forecasting. ARIMA models are good at forecasting for data that will not have rapid changes in the future, and this project showed us during the competition phase that some days could have rapid shocks. ARIMA models can't respond well to those shocks due to their feature of making predictions by fitting past value patterns to the future. But it had a better performance in terms of WMAPE values when compared to linear regression model we used, so hourly specific ARIMA was our final choice.
+
